@@ -506,11 +506,11 @@ def test_purchase_with_promo(client):
 # Agent Card updated skill count
 # -----------------------------------------------------------------------
 
-def test_agent_card_has_28_skills(client):
+def test_agent_card_has_39_skills(client):
     resp = client.get("/.well-known/agent.json")
     card = resp.json()
-    assert len(card["skills"]) == 28
-    assert card["version"] == "0.5.0"
+    assert len(card["skills"]) == 39
+    assert card["version"] == "0.6.0"
 
 
 # -----------------------------------------------------------------------
@@ -807,3 +807,205 @@ def test_video_recommend_by_category(client):
     """video.recommend by category returns results."""
     data = _send(client, {"skill": "video.recommend", "cat": "vid-programming"})
     assert data["total"] >= 1
+
+
+# -----------------------------------------------------------------------
+# Agent Directory tests
+# -----------------------------------------------------------------------
+
+def test_directory_search(client):
+    """directory.search returns agent-discoverable profiles."""
+    data = _send(client, {"skill": "directory.search", "q": "code review"})
+    assert "fields" in data
+    assert data["total"] >= 1
+    # Alice's agent does code review
+    ids = [item[0] for item in data["items"]]
+    assert "p-alice" in ids
+
+
+def test_directory_search_by_skill(client):
+    """directory.search with skill_tag filter."""
+    data = _send(client, {"skill": "directory.search", "q": "", "skill_tag": "python"})
+    assert data["total"] >= 1
+
+
+def test_directory_search_available_only(client):
+    """directory.search with available_only filter."""
+    data = _send(client, {"skill": "directory.search", "q": "", "available_only": True})
+    assert data["total"] >= 1
+    # Carol is not available for hire, should not appear
+    ids = [item[0] for item in data["items"]]
+    assert "p-carol" not in ids
+
+
+def test_directory_search_by_location(client):
+    """directory.search with location filter."""
+    data = _send(client, {"skill": "directory.search", "q": "", "location": "San Francisco"})
+    assert data["total"] >= 1
+    ids = [item[0] for item in data["items"]]
+    assert "p-alice" in ids
+
+
+def test_directory_lookup(client):
+    """directory.lookup returns full profile with agent details."""
+    data = _send(client, {"skill": "directory.lookup", "id": "p-alice"})
+    assert data["id"] == "p-alice"
+    assert data["name"] == "Alice Chen"
+    assert "agent" in data
+    assert data["agent"]["url"] == "https://alice-agent.example.com/a2a"
+    assert data["agent"]["verified"] is True
+    assert "code-review" in data["agent"]["skills"]
+
+
+def test_directory_lookup_not_found(client):
+    """directory.lookup with invalid id returns error."""
+    result = _send(client, {"skill": "directory.lookup", "id": "p-nonexistent"})
+    assert result["status"]["state"] == "failed"
+
+
+def test_directory_skills(client):
+    """directory.skills returns capability tags."""
+    data = _send(client, {"skill": "directory.skills"})
+    assert "fields" in data
+    assert "skills" in data
+    assert len(data["skills"]) >= 5
+
+
+def test_directory_register(client):
+    """directory.register creates a new profile."""
+    data = _send(client, {"skill": "directory.register",
+                          "id": "p-test-new", "name": "Test Agent Owner",
+                          "headline": "QA Engineer — Agent: TestRunner",
+                          "agent_url": "https://test-agent.example.com/a2a",
+                          "agent_description": "Automated testing agent",
+                          "agent_skills": ["testing", "qa"],
+                          "location": "Remote"})
+    assert data["status"] == "registered"
+    assert data["id"] == "p-test-new"
+    # Verify it's searchable
+    search = _send(client, {"skill": "directory.search", "q": "TestRunner"})
+    assert search["total"] >= 1
+
+
+# -----------------------------------------------------------------------
+# Business Directory tests
+# -----------------------------------------------------------------------
+
+def test_business_search(client):
+    """business.search returns companies."""
+    data = _send(client, {"skill": "business.search", "q": "agent"})
+    assert "fields" in data
+    assert data["total"] >= 1
+    ids = [item[0] for item in data["items"]]
+    assert "biz-agentforge" in ids
+
+
+def test_business_search_by_industry(client):
+    """business.search with industry filter."""
+    data = _send(client, {"skill": "business.search", "q": "", "industry": "LegalTech"})
+    assert data["total"] >= 1
+    ids = [item[0] for item in data["items"]]
+    assert "biz-lexai" in ids
+
+
+def test_business_lookup(client):
+    """business.lookup returns full company profile with jobs."""
+    data = _send(client, {"skill": "business.lookup", "id": "biz-agentforge"})
+    assert data["id"] == "biz-agentforge"
+    assert data["name"] == "AgentForge"
+    assert data["open_jobs"] >= 1
+    assert len(data["jobs"]) >= 1
+    assert "agent-frameworks" in data["specialties"]
+
+
+def test_business_lookup_not_found(client):
+    """business.lookup with invalid id returns error."""
+    result = _send(client, {"skill": "business.lookup", "id": "biz-nonexistent"})
+    assert result["status"]["state"] == "failed"
+
+
+def test_business_industries(client):
+    """business.industries returns industry categories."""
+    data = _send(client, {"skill": "business.industries"})
+    assert "fields" in data
+    assert "industries" in data
+    assert len(data["industries"]) >= 4
+
+
+# -----------------------------------------------------------------------
+# Job Postings tests
+# -----------------------------------------------------------------------
+
+def test_jobs_search(client):
+    """jobs.search returns job postings."""
+    data = _send(client, {"skill": "jobs.search", "q": "agent engineer"})
+    assert "fields" in data
+    assert data["total"] >= 1
+
+
+def test_jobs_search_remote(client):
+    """jobs.search with remote_only filter."""
+    data = _send(client, {"skill": "jobs.search", "q": "", "remote_only": True})
+    assert data["total"] >= 1
+    # All returned jobs should be remote
+    for item in data["items"]:
+        assert item[4] is True  # remote field
+
+
+def test_jobs_search_by_type(client):
+    """jobs.search with employment_type filter."""
+    data = _send(client, {"skill": "jobs.search", "q": "", "employment_type": "contract"})
+    assert data["total"] >= 1
+    for item in data["items"]:
+        assert item[5] == "contract"
+
+
+def test_jobs_search_salary_floor(client):
+    """jobs.search with salary_min filter."""
+    data = _send(client, {"skill": "jobs.search", "q": "", "salary_min": 15000000})
+    assert data["total"] >= 1
+    for item in data["items"]:
+        assert item[7] >= 15000000  # salary_max_cents >= filter
+
+
+def test_jobs_lookup(client):
+    """jobs.lookup returns full job details."""
+    data = _send(client, {"skill": "jobs.lookup", "id": "job-001"})
+    assert data["id"] == "job-001"
+    assert data["title"] == "Senior AI Agent Engineer"
+    assert data["company_id"] == "biz-agentforge"
+    assert data["remote"] is True
+    assert "python" in data["skills_required"]
+
+
+def test_jobs_lookup_not_found(client):
+    """jobs.lookup with invalid id returns error."""
+    result = _send(client, {"skill": "jobs.lookup", "id": "job-nonexistent"})
+    assert result["status"]["state"] == "failed"
+
+
+def test_jobs_post(client):
+    """jobs.post creates a new job posting."""
+    data = _send(client, {"skill": "jobs.post",
+                          "id": "job-test", "title": "Test Position",
+                          "company_id": "biz-agentforge",
+                          "description": "Automated test job posting",
+                          "location": "Remote", "remote": True,
+                          "employment_type": "contract",
+                          "salary_min_cents": 8000000,
+                          "salary_max_cents": 12000000,
+                          "skills_required": ["testing", "qa"],
+                          "industry": "AI/ML", "category": "Engineering"})
+    assert data["status"] == "posted"
+    assert data["id"] == "job-test"
+    # Verify searchable
+    search = _send(client, {"skill": "jobs.search", "q": "Test Position"})
+    assert search["total"] >= 1
+
+
+def test_jobs_categories(client):
+    """jobs.categories returns job categories."""
+    data = _send(client, {"skill": "jobs.categories"})
+    assert "fields" in data
+    assert "categories" in data
+    assert len(data["categories"]) >= 3

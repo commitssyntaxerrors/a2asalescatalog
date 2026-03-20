@@ -38,6 +38,9 @@ from src.server.skills import SkillRouter
 from src.server.store import CatalogStore
 from src.server.vendor_analytics import VendorAnalytics
 from src.server.video_skills import VideoSkillRouter
+from src.server.directory_skills import DirectorySkillRouter
+from src.server.business_skills import BusinessSkillRouter
+from src.server.jobs_skills import JobsSkillRouter
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -62,6 +65,9 @@ AGENT_CARD_PATH = Path(__file__).resolve().parent.parent.parent / "schemas" / "a
 store: CatalogStore | None = None
 router: SkillRouter | None = None
 video_router: VideoSkillRouter | None = None
+directory_router: DirectorySkillRouter | None = None
+business_router: BusinessSkillRouter | None = None
+jobs_router: JobsSkillRouter | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +76,7 @@ video_router: VideoSkillRouter | None = None
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    global store, router, video_router
+    global store, router, video_router, directory_router, business_router, jobs_router
     store = CatalogStore(DB_PATH)
     ad_engine = AdEngine(store)
     tracker = AgentTracker(store)
@@ -91,6 +97,9 @@ async def lifespan(app: Starlette):
         retargeting, affiliates, rtb, promotions, audience, attribution,
     )
     video_router = VideoSkillRouter(store)
+    directory_router = DirectorySkillRouter(store)
+    business_router = BusinessSkillRouter(store)
+    jobs_router = JobsSkillRouter(store)
 
     # Seed demo data if empty
     if not store.list_categories():
@@ -190,8 +199,17 @@ def _handle_task_send(rpc_id: Any, params: dict, agent_id: str = "") -> JSONResp
     skill_name = skill_data.get("skill", "")
     assert router is not None
     assert video_router is not None
+    assert directory_router is not None
+    assert business_router is not None
+    assert jobs_router is not None
     if video_router.can_handle(skill_name):
         result_data = video_router.handle(skill_data, agent_id=agent_id)
+    elif directory_router.can_handle(skill_name):
+        result_data = directory_router.handle(skill_data, agent_id=agent_id)
+    elif business_router.can_handle(skill_name):
+        result_data = business_router.handle(skill_data, agent_id=agent_id)
+    elif jobs_router.can_handle(skill_name):
+        result_data = jobs_router.handle(skill_data, agent_id=agent_id)
     else:
         result_data = router.handle(skill_data, agent_id=agent_id)
 
@@ -545,6 +563,235 @@ def _seed_demo_data(s: CatalogStore) -> None:
     ]
     for pl in playlists:
         s.upsert_video_playlist(pl)
+
+    # ---------------------------------------------------------------
+    # Agent directory seed data
+    # ---------------------------------------------------------------
+    from src.common.models import (
+        BusinessProfile, IndustryCategory, JobCategory, JobPosting, PersonProfile,
+    )
+
+    # Directory skill tags
+    skill_tags = [
+        ("sk-code-review", "Code Review", 0),
+        ("sk-data-analysis", "Data Analysis", 0),
+        ("sk-web-scraping", "Web Scraping", 0),
+        ("sk-content-writing", "Content Writing", 0),
+        ("sk-translation", "Translation", 0),
+        ("sk-image-gen", "Image Generation", 0),
+        ("sk-legal-research", "Legal Research", 0),
+        ("sk-financial-analysis", "Financial Analysis", 0),
+    ]
+    for sid, label, count in skill_tags:
+        s.upsert_directory_skill(sid, label, count)
+
+    # People with agents
+    people = [
+        PersonProfile(
+            id="p-alice", name="Alice Chen", headline="Senior ML Engineer — Agent: CodeReviewer",
+            agent_url="https://alice-agent.example.com/a2a",
+            agent_card_url="https://alice-agent.example.com/.well-known/agent.json",
+            agent_description="AI code review agent specializing in Python, Rust, and ML pipelines",
+            agent_skills=["code-review", "ml-pipelines", "python"],
+            agent_verified=True,
+            location="San Francisco, CA", skills=["python", "rust", "pytorch"],
+            experience_years=8, current_company="DeepMind", current_title="Senior ML Engineer",
+            industry="AI/ML", bio="Building AI agents that review code better than humans.",
+            email="alice@example.com", website="https://alice.dev",
+            available_for_hire=True, created_at=time.time(), updated_at=time.time(),
+        ),
+        PersonProfile(
+            id="p-bob", name="Bob Martinez", headline="Data Scientist — Agent: DataWrangler",
+            agent_url="https://bob-agent.example.com/a2a",
+            agent_card_url="https://bob-agent.example.com/.well-known/agent.json",
+            agent_description="Data analysis and visualization agent that handles CSV, SQL, and APIs",
+            agent_skills=["data-analysis", "sql", "visualization"],
+            agent_verified=True,
+            location="Austin, TX", skills=["python", "sql", "tableau"],
+            experience_years=5, current_company="DataCorp", current_title="Data Scientist",
+            industry="Data Science", bio="My agent turns messy data into insights.",
+            email="bob@example.com", website="https://bobmartinez.io",
+            available_for_hire=True, created_at=time.time(), updated_at=time.time(),
+        ),
+        PersonProfile(
+            id="p-carol", name="Carol Tanaka", headline="Full-Stack Dev — Agent: WebScraper",
+            agent_url="https://carol-agent.example.com/a2a",
+            agent_card_url="https://carol-agent.example.com/.well-known/agent.json",
+            agent_description="Web scraping and data extraction agent with anti-detection capabilities",
+            agent_skills=["web-scraping", "data-extraction", "browser-automation"],
+            agent_verified=False,
+            location="Tokyo, Japan", skills=["typescript", "python", "playwright"],
+            experience_years=6, current_company="ScrapeIO", current_title="Lead Developer",
+            industry="SaaS", bio="Ethical web scraping at scale.",
+            email="carol@example.com", website="https://caroltanaka.dev",
+            available_for_hire=False, created_at=time.time(), updated_at=time.time(),
+        ),
+        PersonProfile(
+            id="p-david", name="David Park", headline="Technical Writer — Agent: ContentBot",
+            agent_url="https://david-agent.example.com/a2a",
+            agent_card_url="https://david-agent.example.com/.well-known/agent.json",
+            agent_description="Content writing agent for technical docs, blog posts, and API references",
+            agent_skills=["content-writing", "technical-docs", "api-docs"],
+            agent_verified=True,
+            location="Seattle, WA", skills=["markdown", "openapi", "docs-as-code"],
+            experience_years=10, current_company="DocuTech", current_title="Head of Content",
+            industry="Developer Tools", bio="Documentation that developers actually read.",
+            email="david@example.com", website="https://davidpark.writing",
+            available_for_hire=True, created_at=time.time(), updated_at=time.time(),
+        ),
+        PersonProfile(
+            id="p-elena", name="Elena Rossi", headline="Attorney — Agent: LegalResearcher",
+            agent_url="https://elena-agent.example.com/a2a",
+            agent_card_url="https://elena-agent.example.com/.well-known/agent.json",
+            agent_description="Legal research agent for IP, contracts, and compliance analysis",
+            agent_skills=["legal-research", "contract-analysis", "ip-law"],
+            agent_verified=True,
+            location="New York, NY", skills=["ip-law", "contracts", "compliance"],
+            experience_years=12, current_company="Rossi Legal", current_title="Partner",
+            industry="Legal", bio="IP attorney with an AI agent that does legal research.",
+            email="elena@example.com", website="https://rossilegal.com",
+            available_for_hire=True, created_at=time.time(), updated_at=time.time(),
+        ),
+    ]
+    for p in people:
+        s.upsert_person(p)
+
+    # Businesses
+    businesses = [
+        BusinessProfile(
+            id="biz-agentforge", name="AgentForge", description="Platform for building and deploying AI agents",
+            industry="AI/ML", location="San Francisco, CA", website="https://agentforge.ai",
+            employee_count=120, founded_year=2024, revenue_range="$10M-$50M",
+            verified=True, open_jobs=3, specialties=["agent-frameworks", "llm-ops", "a2a-protocol"],
+        ),
+        BusinessProfile(
+            id="biz-datapipe", name="DataPipe", description="Enterprise data pipeline automation",
+            industry="Data Infrastructure", location="Austin, TX", website="https://datapipe.io",
+            employee_count=85, founded_year=2022, revenue_range="$5M-$10M",
+            verified=True, open_jobs=2, specialties=["etl", "streaming", "data-quality"],
+        ),
+        BusinessProfile(
+            id="biz-lexai", name="LexAI", description="AI-powered legal research and document analysis",
+            industry="LegalTech", location="New York, NY", website="https://lexai.law",
+            employee_count=45, founded_year=2023, revenue_range="$1M-$5M",
+            verified=True, open_jobs=1, specialties=["legal-ai", "contract-analysis", "compliance"],
+        ),
+        BusinessProfile(
+            id="biz-scrapeio", name="ScrapeIO", description="Ethical web data extraction platform",
+            industry="SaaS", location="Tokyo, Japan", website="https://scrapeio.com",
+            employee_count=30, founded_year=2023, revenue_range="$1M-$5M",
+            verified=False, open_jobs=0, specialties=["web-scraping", "data-extraction", "apis"],
+        ),
+    ]
+    for b in businesses:
+        s.upsert_business(b)
+
+    # Industry categories
+    industries = [
+        IndustryCategory("ind-aiml", "AI & Machine Learning", business_count=2),
+        IndustryCategory("ind-data", "Data Infrastructure", business_count=1),
+        IndustryCategory("ind-legal", "LegalTech", business_count=1),
+        IndustryCategory("ind-saas", "SaaS", business_count=1),
+        IndustryCategory("ind-fintech", "FinTech", business_count=0),
+        IndustryCategory("ind-devtools", "Developer Tools", business_count=0),
+    ]
+    for ind in industries:
+        s.upsert_industry(ind)
+
+    # Job postings
+    jobs = [
+        JobPosting(
+            id="job-001", title="Senior AI Agent Engineer",
+            company_id="biz-agentforge",
+            description="Build and maintain multi-agent systems using A2A protocol",
+            location="San Francisco, CA", remote=True, employment_type="full-time",
+            salary_min_cents=18000000, salary_max_cents=25000000,
+            experience_min=5, experience_max=10,
+            skills_required=["python", "a2a", "llm", "agent-frameworks"],
+            industry="AI/ML", category="Engineering",
+            apply_url="https://agentforge.ai/careers/senior-agent-eng",
+            active=True, posted_at=time.time() - 86400 * 3,
+            expires_at=time.time() + 86400 * 27,
+        ),
+        JobPosting(
+            id="job-002", title="ML Research Scientist",
+            company_id="biz-agentforge",
+            description="Research novel agent reasoning and planning algorithms",
+            location="San Francisco, CA", remote=True, employment_type="full-time",
+            salary_min_cents=20000000, salary_max_cents=30000000,
+            experience_min=3, experience_max=8,
+            skills_required=["pytorch", "transformers", "rl", "research"],
+            industry="AI/ML", category="Research",
+            apply_url="https://agentforge.ai/careers/ml-researcher",
+            active=True, posted_at=time.time() - 86400 * 7,
+            expires_at=time.time() + 86400 * 23,
+        ),
+        JobPosting(
+            id="job-003", title="Data Pipeline Engineer",
+            company_id="biz-datapipe",
+            description="Design and operate large-scale data pipelines for enterprise clients",
+            location="Austin, TX", remote=False, employment_type="full-time",
+            salary_min_cents=14000000, salary_max_cents=18000000,
+            experience_min=3, experience_max=7,
+            skills_required=["python", "spark", "kafka", "sql"],
+            industry="Data Infrastructure", category="Engineering",
+            apply_url="https://datapipe.io/jobs/pipeline-eng",
+            active=True, posted_at=time.time() - 86400 * 5,
+            expires_at=time.time() + 86400 * 25,
+        ),
+        JobPosting(
+            id="job-004", title="DevOps Engineer",
+            company_id="biz-datapipe",
+            description="Manage cloud infrastructure and CI/CD for data platform",
+            location="Austin, TX", remote=True, employment_type="full-time",
+            salary_min_cents=13000000, salary_max_cents=17000000,
+            experience_min=2, experience_max=6,
+            skills_required=["kubernetes", "terraform", "aws", "ci-cd"],
+            industry="Data Infrastructure", category="DevOps",
+            apply_url="https://datapipe.io/jobs/devops",
+            active=True, posted_at=time.time() - 86400 * 2,
+            expires_at=time.time() + 86400 * 28,
+        ),
+        JobPosting(
+            id="job-005", title="AI Legal Analyst",
+            company_id="biz-lexai",
+            description="Train and evaluate legal AI models for contract analysis",
+            location="New York, NY", remote=True, employment_type="full-time",
+            salary_min_cents=12000000, salary_max_cents=16000000,
+            experience_min=2, experience_max=5,
+            skills_required=["nlp", "legal-domain", "python", "annotation"],
+            industry="LegalTech", category="AI/ML",
+            apply_url="https://lexai.law/careers/ai-legal-analyst",
+            active=True, posted_at=time.time() - 86400 * 1,
+            expires_at=time.time() + 86400 * 29,
+        ),
+        JobPosting(
+            id="job-006", title="Agent Integration Contractor",
+            company_id="biz-agentforge",
+            description="Contract role: integrate third-party agents with AgentForge platform",
+            location="Remote", remote=True, employment_type="contract",
+            salary_min_cents=10000000, salary_max_cents=15000000,
+            experience_min=3, experience_max=8,
+            skills_required=["a2a", "rest-apis", "python", "integration"],
+            industry="AI/ML", category="Engineering",
+            apply_url="https://agentforge.ai/careers/agent-integrator",
+            active=True, posted_at=time.time() - 86400 * 4,
+            expires_at=time.time() + 86400 * 26,
+        ),
+    ]
+    for j in jobs:
+        s.upsert_job(j)
+
+    # Job categories
+    job_cats = [
+        JobCategory("jc-eng", "Engineering", job_count=4),
+        JobCategory("jc-research", "Research", job_count=1),
+        JobCategory("jc-devops", "DevOps", job_count=1),
+        JobCategory("jc-aiml", "AI/ML", job_count=1),
+        JobCategory("jc-design", "Design", job_count=0),
+    ]
+    for jc in job_cats:
+        s.upsert_job_category(jc)
 
 
 # ---------------------------------------------------------------------------

@@ -446,3 +446,130 @@ def item_to_tuple(item: CatalogItem, vendor_domain: str = "") -> list[Any]:
 def category_to_tuple(cat: Category) -> list[Any]:
     """Encode a Category as a positional tuple matching CATEGORY_FIELDS."""
     return [cat.id, cat.label, cat.item_count]
+
+
+# ---------------------------------------------------------------------------
+# Agent Directory models — humans register profiles, their agents are discoverable
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class PersonProfile:
+    """A human's profile with a discoverable A2A agent endpoint.
+
+    The human owns the agent. Other agents search the directory to find
+    specialist agents, service providers, or contractors — then transact
+    directly over A2A.
+    """
+    id: str
+    name: str
+    headline: str  # e.g. "AI Tax Consultant — automated filings via A2A"
+    # Agent endpoint info — the discoverable part
+    agent_url: str = ""       # A2A endpoint (e.g., https://tax-agent.example.com/a2a)
+    agent_card_url: str = ""  # Agent Card URL (/.well-known/agent.json)
+    agent_description: str = ""  # What the agent does / can be hired for
+    agent_skills: list[str] = field(default_factory=list)  # capability tags
+    agent_verified: bool = False  # agent endpoint validated reachable
+    # Human info
+    location: str = ""
+    skills: list[str] = field(default_factory=list)  # human skills/expertise
+    experience_years: int = 0
+    current_company: str = ""
+    current_title: str = ""
+    industry: str = ""
+    bio: str = ""
+    email: str = ""
+    website: str = ""
+    avatar_url: str = ""
+    available_for_hire: bool = False
+    verified: bool = False  # human identity verified
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+
+DIRECTORY_SEARCH_FIELDS = [
+    "id", "name", "headline", "agent_url", "location",
+    "agent_verified", "available_for_hire", "verified",
+]
+DIRECTORY_SKILL_FIELDS = ["id", "label", "agent_count"]
+
+
+# ---------------------------------------------------------------------------
+# Business directory models
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class BusinessProfile:
+    """A business/company profile in the directory."""
+    id: str
+    name: str
+    description: str
+    industry: str
+    location: str = ""
+    website: str = ""
+    employee_count: int = 0
+    founded_year: int = 0
+    revenue_range: str = ""  # e.g. "$1M-$10M"
+    logo_url: str = ""
+    verified: bool = False
+    open_jobs: int = 0
+    specialties: list[str] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class IndustryCategory:
+    id: str
+    label: str
+    parent_id: str | None = None
+    business_count: int = 0
+
+
+BUSINESS_SEARCH_FIELDS = [
+    "id", "name", "industry", "location", "employee_count",
+    "open_jobs", "verified",
+]
+INDUSTRY_FIELDS = ["id", "label", "business_count"]
+
+
+# ---------------------------------------------------------------------------
+# Job postings models
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class JobPosting:
+    """A job posting in the directory."""
+    id: str
+    title: str
+    company_id: str  # FK to BusinessProfile
+    description: str
+    location: str = ""
+    remote: bool = False
+    employment_type: str = "full_time"  # full_time, part_time, contract, internship
+    salary_min_cents: int = 0
+    salary_max_cents: int = 0
+    salary_currency: str = "USD"
+    experience_min: int = 0
+    experience_max: int = 0
+    skills_required: list[str] = field(default_factory=list)
+    industry: str = ""
+    category: str = ""
+    apply_url: str = ""
+    active: bool = True
+    posted_at: float = field(default_factory=time.time)
+    expires_at: float = 0.0
+
+
+@dataclass(slots=True)
+class JobCategory:
+    id: str
+    label: str
+    parent_id: str | None = None
+    job_count: int = 0
+
+
+JOB_SEARCH_FIELDS = [
+    "id", "title", "company", "location", "remote",
+    "employment_type", "salary_min_cents", "salary_max_cents",
+]
+JOB_CATEGORY_FIELDS = ["id", "label", "job_count"]

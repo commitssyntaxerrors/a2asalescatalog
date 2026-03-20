@@ -18,6 +18,8 @@ from src.common.models import (
     ConversionAttribution, CrossSellRule, FrequencyRecord,
     NegotiationSession, Order, Promotion, TouchPoint, Vendor,
     VideoCategory, VideoChannel, VideoItem, VideoPlaylist,
+    BusinessProfile, IndustryCategory, JobCategory, JobPosting,
+    PersonProfile,
     classify_intent,
 )
 
@@ -326,6 +328,109 @@ class CatalogStore:
                 video_ids TEXT DEFAULT '[]',
                 auto_generated INTEGER DEFAULT 0,
                 created_at REAL
+            );
+
+            -- Agent directory tables (humans with discoverable agents)
+            CREATE TABLE IF NOT EXISTS people (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                headline TEXT NOT NULL,
+                agent_url TEXT DEFAULT '',
+                agent_card_url TEXT DEFAULT '',
+                agent_description TEXT DEFAULT '',
+                agent_skills TEXT DEFAULT '[]',
+                agent_verified INTEGER DEFAULT 0,
+                location TEXT DEFAULT '',
+                skills TEXT DEFAULT '[]',
+                experience_years INTEGER DEFAULT 0,
+                current_company TEXT DEFAULT '',
+                current_title TEXT DEFAULT '',
+                industry TEXT DEFAULT '',
+                bio TEXT DEFAULT '',
+                email TEXT DEFAULT '',
+                website TEXT DEFAULT '',
+                avatar_url TEXT DEFAULT '',
+                available_for_hire INTEGER DEFAULT 0,
+                verified INTEGER DEFAULT 0,
+                created_at REAL,
+                updated_at REAL
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS people_fts USING fts5(
+                id, name, headline, bio, skills, agent_description, agent_skills,
+                content=people, content_rowid=rowid
+            );
+
+            CREATE TABLE IF NOT EXISTS directory_skill_tags (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                agent_count INTEGER DEFAULT 0
+            );
+
+            -- Business directory tables
+            CREATE TABLE IF NOT EXISTS businesses (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                industry TEXT NOT NULL,
+                location TEXT DEFAULT '',
+                website TEXT DEFAULT '',
+                employee_count INTEGER DEFAULT 0,
+                founded_year INTEGER DEFAULT 0,
+                revenue_range TEXT DEFAULT '',
+                logo_url TEXT DEFAULT '',
+                verified INTEGER DEFAULT 0,
+                open_jobs INTEGER DEFAULT 0,
+                specialties TEXT DEFAULT '[]',
+                created_at REAL,
+                updated_at REAL
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS businesses_fts USING fts5(
+                id, name, description, specialties,
+                content=businesses, content_rowid=rowid
+            );
+
+            CREATE TABLE IF NOT EXISTS industry_categories (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                parent_id TEXT,
+                business_count INTEGER DEFAULT 0
+            );
+
+            -- Job postings tables
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                company_id TEXT NOT NULL REFERENCES businesses(id),
+                description TEXT NOT NULL,
+                location TEXT DEFAULT '',
+                remote INTEGER DEFAULT 0,
+                employment_type TEXT DEFAULT 'full_time',
+                salary_min_cents INTEGER DEFAULT 0,
+                salary_max_cents INTEGER DEFAULT 0,
+                salary_currency TEXT DEFAULT 'USD',
+                experience_min INTEGER DEFAULT 0,
+                experience_max INTEGER DEFAULT 0,
+                skills_required TEXT DEFAULT '[]',
+                industry TEXT DEFAULT '',
+                category TEXT DEFAULT '',
+                apply_url TEXT DEFAULT '',
+                active INTEGER DEFAULT 1,
+                posted_at REAL,
+                expires_at REAL DEFAULT 0
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS jobs_fts USING fts5(
+                id, title, description, skills_required,
+                content=jobs, content_rowid=rowid
+            );
+
+            CREATE TABLE IF NOT EXISTS job_categories (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                parent_id TEXT,
+                job_count INTEGER DEFAULT 0
             );
         """)
         c.commit()
@@ -1222,3 +1327,266 @@ class CatalogStore:
         for r in rows:
             result[r["intent_tier"]] = r["cnt"]
         return result
+
+    # ------------------------------------------------------------------
+    # Agent Directory (People) operations
+    # ------------------------------------------------------------------
+
+    def upsert_person(self, p: PersonProfile) -> None:
+        import json as _json
+        self._conn.execute(
+            """INSERT OR REPLACE INTO people
+            (id, name, headline, agent_url, agent_card_url, agent_description,
+             agent_skills, agent_verified, location, skills, experience_years,
+             current_company, current_title, industry, bio, email, website,
+             avatar_url, available_for_hire, verified, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (p.id, p.name, p.headline, p.agent_url, p.agent_card_url,
+             p.agent_description, _json.dumps(p.agent_skills),
+             int(p.agent_verified), p.location, _json.dumps(p.skills),
+             p.experience_years, p.current_company, p.current_title,
+             p.industry, p.bio, p.email, p.website, p.avatar_url,
+             int(p.available_for_hire), int(p.verified),
+             p.created_at, p.updated_at),
+        )
+        # Update FTS index
+        rid = self._conn.execute("SELECT rowid FROM people WHERE id = ?", (p.id,)).fetchone()
+        if rid:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO people_fts (rowid, id, name, headline, bio, skills, agent_description, agent_skills) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (rid[0], p.id, p.name, p.headline, p.bio,
+                 " ".join(p.skills), p.agent_description,
+                 " ".join(p.agent_skills)),
+            )
+        self._conn.commit()
+
+    def search_people(self, q: str, *, location: str | None = None,
+                      skill: str | None = None, available_only: bool = False,
+                      industry: str | None = None,
+                      limit: int = 10) -> list[dict[str, Any]]:
+        conditions: list[str] = ["p.id IS NOT NULL"]
+        params: list[Any] = []
+        if q:
+            fts_clause = "p.rowid IN (SELECT rowid FROM people_fts WHERE people_fts MATCH ?)"
+            conditions.append(fts_clause)
+            params.append(q)
+        if location:
+            conditions.append("p.location LIKE ?")
+            params.append(f"%{location}%")
+        if skill:
+            conditions.append("(p.skills LIKE ? OR p.agent_skills LIKE ?)")
+            params.append(f"%{skill}%")
+            params.append(f"%{skill}%")
+        if available_only:
+            conditions.append("p.available_for_hire = 1")
+        if industry:
+            conditions.append("p.industry = ?")
+            params.append(industry)
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM people p WHERE {where} LIMIT ?", params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def lookup_person(self, person_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM people WHERE id = ?", (person_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_directory_skill(self, skill_id: str, label: str, agent_count: int = 0) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO directory_skill_tags (id, label, agent_count) VALUES (?,?,?)",
+            (skill_id, label, agent_count),
+        )
+        self._conn.commit()
+
+    def list_directory_skills(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM directory_skill_tags ORDER BY label"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Business directory operations
+    # ------------------------------------------------------------------
+
+    def upsert_business(self, b: BusinessProfile) -> None:
+        import json as _json
+        self._conn.execute(
+            """INSERT OR REPLACE INTO businesses
+            (id, name, description, industry, location, website, employee_count,
+             founded_year, revenue_range, logo_url, verified, open_jobs,
+             specialties, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (b.id, b.name, b.description, b.industry, b.location, b.website,
+             b.employee_count, b.founded_year, b.revenue_range, b.logo_url,
+             int(b.verified), b.open_jobs, _json.dumps(b.specialties),
+             b.created_at, b.updated_at),
+        )
+        rid = self._conn.execute("SELECT rowid FROM businesses WHERE id = ?", (b.id,)).fetchone()
+        if rid:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO businesses_fts (rowid, id, name, description, specialties) "
+                "VALUES (?,?,?,?,?)",
+                (rid[0], b.id, b.name, b.description, " ".join(b.specialties)),
+            )
+        self._conn.commit()
+
+    def search_businesses(self, q: str, *, industry: str | None = None,
+                          location: str | None = None,
+                          limit: int = 10) -> list[dict[str, Any]]:
+        conditions: list[str] = ["b.id IS NOT NULL"]
+        params: list[Any] = []
+        if q:
+            conditions.append("b.rowid IN (SELECT rowid FROM businesses_fts WHERE businesses_fts MATCH ?)")
+            params.append(q)
+        if industry:
+            conditions.append("b.industry = ?")
+            params.append(industry)
+        if location:
+            conditions.append("b.location LIKE ?")
+            params.append(f"%{location}%")
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM businesses b WHERE {where} LIMIT ?", params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def lookup_business(self, biz_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM businesses WHERE id = ?", (biz_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_industry(self, cat: IndustryCategory) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO industry_categories (id, label, parent_id, business_count) "
+            "VALUES (?,?,?,?)",
+            (cat.id, cat.label, cat.parent_id, cat.business_count),
+        )
+        self._conn.commit()
+
+    def list_industries(self, parent_id: str | None = None) -> list[dict[str, Any]]:
+        if parent_id is None:
+            rows = self._conn.execute(
+                "SELECT * FROM industry_categories WHERE parent_id IS NULL ORDER BY label"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM industry_categories WHERE parent_id = ? ORDER BY label",
+                (parent_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Job postings operations
+    # ------------------------------------------------------------------
+
+    def upsert_job(self, j: JobPosting) -> None:
+        import json as _json
+        self._conn.execute(
+            """INSERT OR REPLACE INTO jobs
+            (id, title, company_id, description, location, remote,
+             employment_type, salary_min_cents, salary_max_cents, salary_currency,
+             experience_min, experience_max, skills_required, industry,
+             category, apply_url, active, posted_at, expires_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (j.id, j.title, j.company_id, j.description, j.location,
+             int(j.remote), j.employment_type, j.salary_min_cents,
+             j.salary_max_cents, j.salary_currency, j.experience_min,
+             j.experience_max, _json.dumps(j.skills_required), j.industry,
+             j.category, j.apply_url, int(j.active), j.posted_at, j.expires_at),
+        )
+        rid = self._conn.execute("SELECT rowid FROM jobs WHERE id = ?", (j.id,)).fetchone()
+        if rid:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO jobs_fts (rowid, id, title, description, skills_required) "
+                "VALUES (?,?,?,?,?)",
+                (rid[0], j.id, j.title, j.description, " ".join(j.skills_required)),
+            )
+        self._conn.commit()
+
+    def search_jobs(self, q: str, *, location: str | None = None,
+                    remote_only: bool = False, employment_type: str | None = None,
+                    industry: str | None = None, category: str | None = None,
+                    salary_min: int | None = None,
+                    limit: int = 10) -> list[dict[str, Any]]:
+        conditions: list[str] = ["j.active = 1"]
+        params: list[Any] = []
+        if q:
+            conditions.append("j.rowid IN (SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH ?)")
+            params.append(q)
+        if location:
+            conditions.append("j.location LIKE ?")
+            params.append(f"%{location}%")
+        if remote_only:
+            conditions.append("j.remote = 1")
+        if employment_type:
+            conditions.append("j.employment_type = ?")
+            params.append(employment_type)
+        if industry:
+            conditions.append("j.industry = ?")
+            params.append(industry)
+        if category:
+            conditions.append("j.category = ?")
+            params.append(category)
+        if salary_min is not None:
+            conditions.append("j.salary_max_cents >= ?")
+            params.append(salary_min)
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT j.*, b.name as company_name FROM jobs j "
+            f"JOIN businesses b ON j.company_id = b.id "
+            f"WHERE {where} ORDER BY j.posted_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def lookup_job(self, job_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT j.*, b.name as company_name FROM jobs j "
+            "JOIN businesses b ON j.company_id = b.id WHERE j.id = ?",
+            (job_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_job_category(self, cat: JobCategory) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO job_categories (id, label, parent_id, job_count) "
+            "VALUES (?,?,?,?)",
+            (cat.id, cat.label, cat.parent_id, cat.job_count),
+        )
+        self._conn.commit()
+
+    def list_job_categories(self, parent_id: str | None = None) -> list[dict[str, Any]]:
+        if parent_id is None:
+            rows = self._conn.execute(
+                "SELECT * FROM job_categories WHERE parent_id IS NULL ORDER BY label"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM job_categories WHERE parent_id = ? ORDER BY label",
+                (parent_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_company_jobs(self, company_id: str, *, active_only: bool = True,
+                         limit: int = 20) -> list[dict[str, Any]]:
+        conditions = ["j.company_id = ?"]
+        params: list[Any] = [company_id]
+        if active_only:
+            conditions.append("j.active = 1")
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT j.*, b.name as company_name FROM jobs j "
+            f"JOIN businesses b ON j.company_id = b.id "
+            f"WHERE {where} ORDER BY j.posted_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]

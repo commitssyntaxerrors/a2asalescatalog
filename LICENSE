@@ -107,6 +107,28 @@ Video Content Catalog:
 - Video recommendation engine for AI agents based on content similarity
 - Trending video aggregation across platforms for agent audiences
 
+Agent Service Directory:
+- Agent-to-agent service discovery protocol enabling humans to register
+  profiles with A2A-accessible agent endpoints for automated discovery
+- Capability-based agent search with FTS5-indexed skill tags, location,
+  availability, and agent verification status
+- Agent endpoint verification framework for validating A2A connectivity
+  and promoting trusted agents in directory rankings
+- Self-registration protocol for agent profiles with owner attribution
+
+Business & Industry Directory:
+- Company profile directory for AI agent commerce with industry
+  categorization, specialties, job counts, and verification status
+- Industry taxonomy with hierarchical categorization and business counts
+  for agent-driven market research
+
+Job Marketplace:
+- Agent-mediated job posting and search protocol with salary ranges,
+  remote eligibility, employment types, and skill-based matching
+- Company-linked job postings with FTS5 search across titles,
+  descriptions, and required skills for agent-driven recruiting
+- Job category taxonomy with hierarchical organization and posting counts
+
 First published: March 19, 2026 (v0.1.0).
 Revised: March 19, 2026 (v0.2.0) — added agent tracking, reputation,
   negotiation, purchase, federation, embeddings, vendor analytics,
@@ -121,6 +143,9 @@ Revised: March 19, 2026 (v0.4.0) — added AXON (Agent eXchange Object
 Revised: March 19, 2026 (v0.5.0) — added video content catalog with
   cross-platform video discovery, transcript-based search, creator profiles,
   playlists, trending aggregation, and content recommendations for AI agents.
+Revised: March 19, 2026 (v0.6.0) — added agent service directory for A2A
+  discovery, business profiles with industry taxonomy, and agent-mediated
+  job marketplace with salary, remote, and skill-based search.
 
 CONTACT
 -------

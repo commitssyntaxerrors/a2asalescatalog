@@ -1,6 +1,6 @@
 # A2A Sales Catalog — Specification Sheet
 
-**Version:** 0.5.0-draft
+**Version:** 0.6.0-draft
 **Date:** 2026-03-19
 **Status:** Draft
 
@@ -1429,7 +1429,137 @@ The source video is always excluded from recommendations.
 
 ---
 
-## 31. Milestones
+## 31. Agent Service Directory
+
+The Agent Service Directory enables **agent-to-agent discovery**. Humans register profiles that make their AI agents discoverable. When an agent needs a specialist, service provider, or contractor, it searches the directory, finds the right agent, and transacts directly over A2A.
+
+### 31.1 Person + Agent Profile
+
+Each directory entry represents a **human operator** and their **agent endpoint**:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique person ID |
+| `name` | string | Human operator name |
+| `headline` | string | Role + agent branding |
+| `agent_url` | string | A2A endpoint URL of the agent |
+| `agent_card_url` | string | Agent Card URL (/.well-known/agent.json) |
+| `agent_description` | string | What the agent does |
+| `agent_skills` | string[] | Capability tags (e.g., "code-review", "data-analysis") |
+| `agent_verified` | bool | Server has validated the A2A endpoint |
+| `location` | string | Operator location |
+| `skills` | string[] | Human professional skills |
+| `available_for_hire` | bool | Open to work |
+
+### 31.2 Directory Skills
+
+| Skill | Purpose |
+|---|---|
+| `directory.search` | Find agents by capability, skill, location, availability. FTS5-powered with filters. |
+| `directory.lookup` | Full profile with agent endpoint, capabilities, and owner details. |
+| `directory.skills` | Browse all capability tags with agent counts. |
+| `directory.register` | Register or update a profile making an agent discoverable. |
+
+### 31.3 Agent Verification
+
+When a profile is registered, the `agent_verified` field is initially `false`. The server can independently verify the A2A endpoint by fetching the agent card and confirming connectivity. Verified agents rank higher in search results.
+
+### 31.4 Search & Discovery Flow
+
+```
+Consumer Agent → directory.search (q="code review", location="SF")
+             ← Results: [{agent_url, name, verified, skills}]
+
+Consumer Agent → directory.lookup (id="p-alice")
+             ← Full profile with A2A endpoint
+
+Consumer Agent → [Direct A2A call to alice-agent.example.com/a2a]
+             ← Agent-to-agent transaction begins
+```
+
+---
+
+## 32. Business Profiles
+
+Companies register business profiles that aggregate agent operators, open positions, and industry specializations.
+
+### 32.1 Business Profile Schema
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique business ID |
+| `name` | string | Company name |
+| `description` | string | Company description |
+| `industry` | string | Primary industry |
+| `location` | string | HQ location |
+| `website` | string | Company website |
+| `employee_count` | int | Team size |
+| `founded_year` | int | Year founded |
+| `revenue_range` | string | Revenue bracket |
+| `specialties` | string[] | Areas of expertise |
+| `verified` | bool | Identity verified |
+| `open_jobs` | int | Active job postings count |
+
+### 32.2 Business Skills
+
+| Skill | Purpose |
+|---|---|
+| `business.search` | Find companies by name, industry, location. FTS5-powered. |
+| `business.lookup` | Full company profile including active job listings. |
+| `business.industries` | Browse industry categories with counts. |
+
+---
+
+## 33. Job Postings & Search
+
+An agent-mediated job marketplace. Companies post roles; agents search on behalf of candidates.
+
+### 33.1 Job Posting Schema
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique job ID |
+| `title` | string | Job title |
+| `company_id` | string | FK to business profile |
+| `description` | string | Full job description |
+| `location` | string | Job location |
+| `remote` | bool | Remote-eligible |
+| `employment_type` | string | full-time, contract, part-time |
+| `salary_min_cents` | int | Minimum salary in cents/year |
+| `salary_max_cents` | int | Maximum salary in cents/year |
+| `experience_min` | int | Minimum years experience |
+| `experience_max` | int | Maximum years experience |
+| `skills_required` | string[] | Required skill tags |
+| `industry` | string | Industry sector |
+| `category` | string | Job category |
+| `apply_url` | string | Application link |
+| `active` | bool | Currently accepting applications |
+
+### 33.2 Job Skills
+
+| Skill | Purpose |
+|---|---|
+| `jobs.search` | Find jobs by query, location, remote, type, salary, industry, category. |
+| `jobs.lookup` | Full job details with company name and requirements. |
+| `jobs.post` | Create or update a job posting linked to a business. |
+| `jobs.categories` | Browse job categories with counts. |
+
+### 33.3 Agent-Mediated Hiring Flow
+
+```
+Candidate's Agent → jobs.search (q="AI engineer", remote_only=true, salary_min=15000000)
+                 ← Matching jobs with salary ranges
+
+Candidate's Agent → jobs.lookup (id="job-001")
+                 ← Full posting with skills required and apply URL
+
+Candidate's Agent → directory.search (q="recruiter agent", industry="AI/ML")
+                 ← Find recruiter agents to negotiate on their behalf
+```
+
+---
+
+## 34. Milestones
 
 | Phase | Deliverable | Target |
 |---|---|---|
@@ -1446,7 +1576,7 @@ The source video is always excluded from recommendations.
 
 ---
 
-## 32. Open Questions
+## 35. Open Questions
 
 - [ ] Should we support streaming (SSE) for large result sets or keep it simple request/response?
 - [ ] Multi-currency support — convert at query time or store per-vendor?

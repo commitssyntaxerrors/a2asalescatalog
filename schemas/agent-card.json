@@ -1,8 +1,8 @@
 {
   "name": "A2A Sales Catalog",
-  "description": "Agent marketplace for product, service, and video content discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, cross-sell, and video catalog — all over A2A.",
+  "description": "Agent marketplace for product, service, video, agent directory, business, and job discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, cross-sell, video catalog, agent service directory, business profiles, and job postings — all over A2A.",
   "url": "https://catalog.example.com",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,
@@ -224,6 +224,91 @@
       "name": "Video Recommendations",
       "description": "Get personalized video recommendations based on a specific video or category. Excludes the source video.",
       "examples": ["Recommend videos similar to VID-001", "Suggest cooking videos"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "directory.search",
+      "name": "Search Agent Directory",
+      "description": "Find agents by capability, skill, location, or availability. Humans register profiles; their agents are discoverable and transactable over A2A.",
+      "examples": ["Find agents that do code review", "Search for data analysis agents in Austin"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "directory.lookup",
+      "name": "Agent Profile Lookup",
+      "description": "Get full profile for a registered agent including A2A endpoint, capabilities, and owner details.",
+      "examples": ["Get profile for p-alice"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "directory.skills",
+      "name": "Browse Agent Skills",
+      "description": "List all capability tags in the agent directory with counts.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "directory.register",
+      "name": "Register Agent Profile",
+      "description": "Register or update a human profile with agent endpoint details, making the agent discoverable in the directory.",
+      "examples": ["Register my agent at https://my-agent.example.com/a2a"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "business.search",
+      "name": "Search Businesses",
+      "description": "Find companies by name, industry, or location. Returns verified status and open job counts.",
+      "examples": ["Find AI companies in San Francisco", "Search for LegalTech startups"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "business.lookup",
+      "name": "Business Profile Lookup",
+      "description": "Get full company profile including specialties, size, revenue range, and active job listings.",
+      "examples": ["Get profile for biz-agentforge"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "business.industries",
+      "name": "Browse Industries",
+      "description": "List industry categories with business counts.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "jobs.search",
+      "name": "Search Jobs",
+      "description": "Find job postings by query, location, remote status, employment type, industry, category, or minimum salary.",
+      "examples": ["Find remote AI engineer jobs", "Search for contract roles paying over $150k"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "jobs.lookup",
+      "name": "Job Details",
+      "description": "Get full job posting details including requirements, salary range, and company info.",
+      "examples": ["Get details for job-001"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "jobs.post",
+      "name": "Post Job",
+      "description": "Create or update a job posting associated with a business profile.",
+      "examples": ["Post a senior engineer role at biz-agentforge"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "jobs.categories",
+      "name": "Browse Job Categories",
+      "description": "List job categories with posting counts.",
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     }
