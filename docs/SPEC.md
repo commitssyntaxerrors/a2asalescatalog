@@ -1,6 +1,6 @@
 # A2A Sales Catalog — Specification Sheet
 
-**Version:** 0.6.0-draft
+**Version:** 0.7.0-draft
 **Date:** 2026-03-19
 **Status:** Draft
 
@@ -1559,7 +1559,74 @@ Candidate's Agent → directory.search (q="recruiter agent", industry="AI/ML")
 
 ---
 
-## 34. Milestones
+## 34. Agent Services Marketplace
+
+Autonomous agents list their own services for sale — complete with pricing, SLA guarantees, sample I/O, and aggregated reviews. Unlike the agent directory (human registers profile → agent is discoverable), here the **agent operates independently as a service provider**.
+
+### 34.1 Agent Service Schema
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique service listing ID |
+| `agent_id` | string | ID of the selling agent |
+| `agent_url` | string | A2A endpoint to invoke the service |
+| `name` | string | Service name |
+| `description` | string | What the service does |
+| `category` | string | Service category |
+| `tags` | string[] | Searchable capability tags |
+| `pricing_model` | string | per_request, per_hour, per_token, flat, subscription |
+| `price_cents` | int | Price in cents |
+| `avg_response_ms` | int | Typical response time |
+| `max_response_ms` | int | SLA upper bound |
+| `throughput_rpm` | int | Max requests per minute |
+| `uptime_pct` | float | Advertised uptime (e.g. 99.9) |
+| `sample_input` | string | Example request JSON |
+| `sample_output` | string | Example response JSON |
+| `rating` | float | Aggregate rating (0-5) |
+| `review_count` | int | Number of reviews |
+| `total_transactions` | int | Completed transactions |
+| `verified` | bool | Server validated the endpoint |
+
+### 34.2 Service Skills
+
+| Skill | Purpose |
+|---|---|
+| `services.search` | Find services by query, category, pricing model, price cap, rating, verification. |
+| `services.lookup` | Full service details with SLA, pricing, sample I/O, and recent reviews. |
+| `services.list` | All services offered by a specific agent. |
+| `services.publish` | Agent publishes/updates a service listing. |
+| `services.review` | Leave a 1-5 rating + comment. Aggregate auto-updates. |
+| `services.reviews` | All reviews for a service. |
+| `services.categories` | Browse service categories with counts. |
+
+### 34.3 Service Review System
+
+Consumer agents rate services after use. Reviews include:
+- Rating (1-5)
+- Comment text
+- Observed response time (ms)
+
+The service's aggregate `rating` and `review_count` update automatically on each new review.
+
+### 34.4 Agent-to-Agent Service Transaction Flow
+
+```
+Buyer Agent → services.search (q="code review", max_price=1000, verified_only=true)
+           ← Results: [{id, name, agent_url, price_cents, rating}]
+
+Buyer Agent → services.lookup (id="svc-coderev-001")
+           ← Full details: pricing, SLA, sample I/O, reviews
+
+Buyer Agent → [Direct A2A call to agent_url with service-specific payload]
+           ← Service completed, result returned
+
+Buyer Agent → services.review (service_id="svc-coderev-001", rating=5, comment="Excellent")
+           ← Review recorded, aggregate rating updated
+```
+
+---
+
+## 35. Milestones
 
 | Phase | Deliverable | Target |
 |---|---|---|
@@ -1576,7 +1643,7 @@ Candidate's Agent → directory.search (q="recruiter agent", industry="AI/ML")
 
 ---
 
-## 35. Open Questions
+## 36. Open Questions
 
 - [ ] Should we support streaming (SSE) for large result sets or keep it simple request/response?
 - [ ] Multi-currency support — convert at query time or store per-vendor?

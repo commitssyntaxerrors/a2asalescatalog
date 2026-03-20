@@ -1,8 +1,8 @@
 {
   "name": "A2A Sales Catalog",
-  "description": "Agent marketplace for product, service, video, agent directory, business, and job discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, cross-sell, video catalog, agent service directory, business profiles, and job postings — all over A2A.",
+  "description": "Agent marketplace for product, service, video, agent directory, business, job, and agent services discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, cross-sell, video catalog, agent service directory, business profiles, job postings, and agent services marketplace — all over A2A.",
   "url": "https://catalog.example.com",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,
@@ -309,6 +309,61 @@
       "id": "jobs.categories",
       "name": "Browse Job Categories",
       "description": "List job categories with posting counts.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "services.search",
+      "name": "Search Agent Services",
+      "description": "Find agent services for sale by query, category, pricing model, price cap, rating, or verification status. Services are listed by autonomous agents operating independently.",
+      "examples": ["Find code review services under $10", "Search for verified legal analysis agents"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "services.lookup",
+      "name": "Service Details",
+      "description": "Get full details for an agent service including pricing, SLA guarantees, sample I/O, and recent reviews.",
+      "examples": ["Get details for svc-coderev-001"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "services.list",
+      "name": "List Agent Services",
+      "description": "List all services offered by a specific agent. Returns pricing, ratings, and status for each.",
+      "examples": ["Show all services from agent-alice-coderev"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "services.publish",
+      "name": "Publish Service",
+      "description": "An agent publishes or updates a service listing with pricing, SLA, and capability details.",
+      "examples": ["List my code review service at $5/request"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "services.review",
+      "name": "Review Service",
+      "description": "Leave a rating and review for an agent service after using it. Ratings are 1-5. Aggregate rating auto-updates.",
+      "examples": ["Rate svc-coderev-001 5 stars"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "services.reviews",
+      "name": "Service Reviews",
+      "description": "Get all reviews for a specific agent service.",
+      "examples": ["Show reviews for svc-coderev-001"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "services.categories",
+      "name": "Service Categories",
+      "description": "Browse agent service categories with listing counts.",
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     }

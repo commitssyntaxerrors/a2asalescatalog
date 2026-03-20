@@ -20,6 +20,7 @@ from src.common.models import (
     VideoCategory, VideoChannel, VideoItem, VideoPlaylist,
     BusinessProfile, IndustryCategory, JobCategory, JobPosting,
     PersonProfile,
+    AgentService, ServiceReview, ServiceCategory,
     classify_intent,
 )
 
@@ -431,6 +432,58 @@ class CatalogStore:
                 label TEXT NOT NULL,
                 parent_id TEXT,
                 job_count INTEGER DEFAULT 0
+            );
+
+            -- Agent services marketplace tables
+            CREATE TABLE IF NOT EXISTS agent_services (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                agent_url TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                category TEXT DEFAULT '',
+                tags TEXT DEFAULT '[]',
+                pricing_model TEXT DEFAULT 'per_request',
+                price_cents INTEGER DEFAULT 0,
+                currency TEXT DEFAULT 'USD',
+                avg_response_ms INTEGER DEFAULT 0,
+                max_response_ms INTEGER DEFAULT 0,
+                throughput_rpm INTEGER DEFAULT 0,
+                uptime_pct REAL DEFAULT 0.0,
+                input_modes TEXT DEFAULT '["application/json"]',
+                output_modes TEXT DEFAULT '["application/json"]',
+                sample_input TEXT DEFAULT '',
+                sample_output TEXT DEFAULT '',
+                terms_url TEXT DEFAULT '',
+                active INTEGER DEFAULT 1,
+                verified INTEGER DEFAULT 0,
+                rating REAL DEFAULT 0.0,
+                review_count INTEGER DEFAULT 0,
+                total_transactions INTEGER DEFAULT 0,
+                created_at REAL,
+                updated_at REAL
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS agent_services_fts USING fts5(
+                id, name, description, tags, category,
+                content=agent_services, content_rowid=rowid
+            );
+
+            CREATE TABLE IF NOT EXISTS service_reviews (
+                id TEXT PRIMARY KEY,
+                service_id TEXT NOT NULL REFERENCES agent_services(id),
+                reviewer_agent_id TEXT NOT NULL,
+                rating INTEGER NOT NULL,
+                comment TEXT DEFAULT '',
+                response_ms INTEGER DEFAULT 0,
+                created_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS service_categories (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                parent_id TEXT,
+                service_count INTEGER DEFAULT 0
             );
         """)
         c.commit()
@@ -1589,4 +1642,140 @@ class CatalogStore:
             f"WHERE {where} ORDER BY j.posted_at DESC LIMIT ?",
             params,
         ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Agent services marketplace CRUD
+    # ------------------------------------------------------------------
+
+    def upsert_agent_service(self, svc: AgentService) -> None:
+        import json as _json
+        self._conn.execute(
+            "INSERT OR REPLACE INTO agent_services "
+            "(id, agent_id, agent_url, name, description, category, tags, "
+            "pricing_model, price_cents, currency, avg_response_ms, max_response_ms, "
+            "throughput_rpm, uptime_pct, input_modes, output_modes, sample_input, "
+            "sample_output, terms_url, active, verified, rating, review_count, "
+            "total_transactions, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (svc.id, svc.agent_id, svc.agent_url, svc.name, svc.description,
+             svc.category, _json.dumps(svc.tags), svc.pricing_model, svc.price_cents,
+             svc.currency, svc.avg_response_ms, svc.max_response_ms,
+             svc.throughput_rpm, svc.uptime_pct,
+             _json.dumps(svc.input_modes), _json.dumps(svc.output_modes),
+             svc.sample_input, svc.sample_output, svc.terms_url,
+             int(svc.active), int(svc.verified), svc.rating, svc.review_count,
+             svc.total_transactions, svc.created_at, svc.updated_at),
+        )
+        # FTS index
+        self._conn.execute(
+            "INSERT OR REPLACE INTO agent_services_fts "
+            "(rowid, id, name, description, tags, category) "
+            "VALUES ((SELECT rowid FROM agent_services WHERE id = ?), ?,?,?,?,?)",
+            (svc.id, svc.id, svc.name, svc.description,
+             " ".join(svc.tags), svc.category),
+        )
+        self._conn.commit()
+
+    def search_agent_services(self, q: str, *, category: str | None = None,
+                              pricing_model: str | None = None,
+                              max_price: int | None = None,
+                              verified_only: bool = False,
+                              min_rating: float | None = None,
+                              limit: int = 10) -> list[dict[str, Any]]:
+        conditions = ["s.active = 1"]
+        params: list[Any] = []
+        if q:
+            conditions.append(
+                "s.id IN (SELECT id FROM agent_services_fts WHERE agent_services_fts MATCH ?)"
+            )
+            params.append(q)
+        if category:
+            conditions.append("s.category = ?")
+            params.append(category)
+        if pricing_model:
+            conditions.append("s.pricing_model = ?")
+            params.append(pricing_model)
+        if max_price is not None:
+            conditions.append("s.price_cents <= ?")
+            params.append(max_price)
+        if verified_only:
+            conditions.append("s.verified = 1")
+        if min_rating is not None:
+            conditions.append("s.rating >= ?")
+            params.append(min_rating)
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM agent_services s WHERE {where} "
+            f"ORDER BY s.rating DESC, s.total_transactions DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def lookup_agent_service(self, service_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM agent_services WHERE id = ?", (service_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_agent_services(self, agent_id: str, *, active_only: bool = True,
+                           limit: int = 50) -> list[dict[str, Any]]:
+        conditions = ["agent_id = ?"]
+        params: list[Any] = [agent_id]
+        if active_only:
+            conditions.append("active = 1")
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM agent_services WHERE {where} ORDER BY rating DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_service_review(self, rev: ServiceReview) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO service_reviews "
+            "(id, service_id, reviewer_agent_id, rating, comment, response_ms, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (rev.id, rev.service_id, rev.reviewer_agent_id,
+             rev.rating, rev.comment, rev.response_ms, rev.created_at),
+        )
+        # Update aggregate rating on the service
+        agg = self._conn.execute(
+            "SELECT AVG(rating) as avg_r, COUNT(*) as cnt FROM service_reviews WHERE service_id = ?",
+            (rev.service_id,),
+        ).fetchone()
+        if agg:
+            self._conn.execute(
+                "UPDATE agent_services SET rating = ?, review_count = ?, updated_at = ? WHERE id = ?",
+                (round(agg["avg_r"], 2), agg["cnt"], rev.created_at, rev.service_id),
+            )
+        self._conn.commit()
+
+    def get_service_reviews(self, service_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM service_reviews WHERE service_id = ? ORDER BY created_at DESC LIMIT ?",
+            (service_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_service_category(self, cat: ServiceCategory) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO service_categories (id, label, parent_id, service_count) "
+            "VALUES (?,?,?,?)",
+            (cat.id, cat.label, cat.parent_id, cat.service_count),
+        )
+        self._conn.commit()
+
+    def list_service_categories(self, parent_id: str | None = None) -> list[dict[str, Any]]:
+        if parent_id is None:
+            rows = self._conn.execute(
+                "SELECT * FROM service_categories WHERE parent_id IS NULL ORDER BY label"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM service_categories WHERE parent_id = ? ORDER BY label",
+                (parent_id,),
+            ).fetchall()
         return [dict(r) for r in rows]

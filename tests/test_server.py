@@ -506,11 +506,11 @@ def test_purchase_with_promo(client):
 # Agent Card updated skill count
 # -----------------------------------------------------------------------
 
-def test_agent_card_has_39_skills(client):
+def test_agent_card_has_46_skills(client):
     resp = client.get("/.well-known/agent.json")
     card = resp.json()
-    assert len(card["skills"]) == 39
-    assert card["version"] == "0.6.0"
+    assert len(card["skills"]) == 46
+    assert card["version"] == "0.7.0"
 
 
 # -----------------------------------------------------------------------
@@ -1009,3 +1009,139 @@ def test_jobs_categories(client):
     assert "fields" in data
     assert "categories" in data
     assert len(data["categories"]) >= 3
+
+
+# -----------------------------------------------------------------------
+# Agent Services Marketplace tests
+# -----------------------------------------------------------------------
+
+def test_services_search(client):
+    """services.search returns agent service listings."""
+    data = _send(client, {"skill": "services.search", "q": "code review"})
+    assert "fields" in data
+    assert data["total"] >= 1
+    ids = [item[0] for item in data["items"]]
+    assert "svc-coderev-001" in ids
+
+
+def test_services_search_by_category(client):
+    """services.search with category filter."""
+    data = _send(client, {"skill": "services.search", "q": "", "category": "Legal & Compliance"})
+    assert data["total"] >= 1
+    ids = [item[0] for item in data["items"]]
+    assert "svc-legalrev-001" in ids
+
+
+def test_services_search_verified_only(client):
+    """services.search with verified_only filter."""
+    data = _send(client, {"skill": "services.search", "q": "", "verified_only": True})
+    assert data["total"] >= 1
+    # StealthScrape is not verified, should not appear
+    ids = [item[0] for item in data["items"]]
+    assert "svc-scrape-001" not in ids
+
+
+def test_services_search_max_price(client):
+    """services.search with max_price filter."""
+    data = _send(client, {"skill": "services.search", "q": "", "max_price": 500})
+    assert data["total"] >= 1
+    for item in data["items"]:
+        assert item[5] <= 500  # price_cents
+
+
+def test_services_search_min_rating(client):
+    """services.search with min_rating filter."""
+    data = _send(client, {"skill": "services.search", "q": "", "min_rating": 4.5})
+    assert data["total"] >= 1
+    for item in data["items"]:
+        assert item[6] >= 4.5  # rating
+
+
+def test_services_lookup(client):
+    """services.lookup returns full service details with SLA and reviews."""
+    data = _send(client, {"skill": "services.lookup", "id": "svc-coderev-001"})
+    assert data["id"] == "svc-coderev-001"
+    assert data["name"] == "AI Code Review Pro"
+    assert data["agent_url"] == "https://alice-agent.example.com/a2a"
+    # Pricing info
+    assert data["pricing"]["model"] == "per_request"
+    assert data["pricing"]["price_cents"] == 500
+    # SLA info
+    assert data["sla"]["avg_response_ms"] == 2000
+    assert data["sla"]["uptime_pct"] == 99.5
+    # Reviews
+    assert data["review_count"] >= 1
+    assert len(data["recent_reviews"]) >= 1
+
+
+def test_services_lookup_not_found(client):
+    """services.lookup with invalid id returns error."""
+    result = _send(client, {"skill": "services.lookup", "id": "svc-nonexistent"})
+    assert result["status"]["state"] == "failed"
+
+
+def test_services_list(client):
+    """services.list returns all services for a specific agent."""
+    data = _send(client, {"skill": "services.list", "agent_id": "agent-alice-coderev"})
+    assert data["total"] >= 2  # Alice has CodeReview and TestForge
+    ids = [item[0] for item in data["items"]]
+    assert "svc-coderev-001" in ids
+    assert "svc-unitgen-001" in ids
+
+
+def test_services_publish(client):
+    """services.publish creates a new service listing."""
+    data = _send(client, {"skill": "services.publish",
+                          "id": "svc-test-new", "name": "Test Service Agent",
+                          "agent_url": "https://test-svc.example.com/a2a",
+                          "agent_id": "agent-tester",
+                          "description": "A test service for QA",
+                          "category": "Development",
+                          "tags": ["testing", "qa"],
+                          "pricing_model": "per_request",
+                          "price_cents": 100})
+    assert data["status"] == "published"
+    assert data["id"] == "svc-test-new"
+    # Verify searchable
+    search = _send(client, {"skill": "services.search", "q": "Test Service Agent"})
+    assert search["total"] >= 1
+
+
+def test_services_review(client):
+    """services.review creates a review and updates aggregate rating."""
+    data = _send(client, {"skill": "services.review",
+                          "service_id": "svc-datasync-001",
+                          "reviewer_agent_id": "test-reviewer",
+                          "rating": 4,
+                          "comment": "Good data cleaning, fast turnaround.",
+                          "response_ms": 4800})
+    assert data["status"] == "reviewed"
+    assert data["rating"] == 4
+    # Lookup should reflect updated review count
+    svc = _send(client, {"skill": "services.lookup", "id": "svc-datasync-001"})
+    assert svc["review_count"] >= 2
+
+
+def test_services_review_invalid_rating(client):
+    """services.review rejects ratings outside 1-5."""
+    result = _send(client, {"skill": "services.review",
+                            "service_id": "svc-coderev-001",
+                            "rating": 6})
+    assert result["status"]["state"] == "failed"
+
+
+def test_services_reviews(client):
+    """services.reviews returns reviews for a service."""
+    data = _send(client, {"skill": "services.reviews", "service_id": "svc-coderev-001"})
+    assert "fields" in data
+    assert data["total"] >= 2
+    # Check review fields present
+    assert len(data["items"][0]) == 5  # id, reviewer, rating, comment, created_at
+
+
+def test_services_categories(client):
+    """services.categories returns service categories."""
+    data = _send(client, {"skill": "services.categories"})
+    assert "fields" in data
+    assert "categories" in data
+    assert len(data["categories"]) >= 5

@@ -41,6 +41,7 @@ from src.server.video_skills import VideoSkillRouter
 from src.server.directory_skills import DirectorySkillRouter
 from src.server.business_skills import BusinessSkillRouter
 from src.server.jobs_skills import JobsSkillRouter
+from src.server.services_skills import ServicesSkillRouter
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -68,6 +69,7 @@ video_router: VideoSkillRouter | None = None
 directory_router: DirectorySkillRouter | None = None
 business_router: BusinessSkillRouter | None = None
 jobs_router: JobsSkillRouter | None = None
+services_router: ServicesSkillRouter | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +78,7 @@ jobs_router: JobsSkillRouter | None = None
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    global store, router, video_router, directory_router, business_router, jobs_router
+    global store, router, video_router, directory_router, business_router, jobs_router, services_router
     store = CatalogStore(DB_PATH)
     ad_engine = AdEngine(store)
     tracker = AgentTracker(store)
@@ -100,6 +102,7 @@ async def lifespan(app: Starlette):
     directory_router = DirectorySkillRouter(store)
     business_router = BusinessSkillRouter(store)
     jobs_router = JobsSkillRouter(store)
+    services_router = ServicesSkillRouter(store)
 
     # Seed demo data if empty
     if not store.list_categories():
@@ -202,6 +205,7 @@ def _handle_task_send(rpc_id: Any, params: dict, agent_id: str = "") -> JSONResp
     assert directory_router is not None
     assert business_router is not None
     assert jobs_router is not None
+    assert services_router is not None
     if video_router.can_handle(skill_name):
         result_data = video_router.handle(skill_data, agent_id=agent_id)
     elif directory_router.can_handle(skill_name):
@@ -210,6 +214,8 @@ def _handle_task_send(rpc_id: Any, params: dict, agent_id: str = "") -> JSONResp
         result_data = business_router.handle(skill_data, agent_id=agent_id)
     elif jobs_router.can_handle(skill_name):
         result_data = jobs_router.handle(skill_data, agent_id=agent_id)
+    elif services_router.can_handle(skill_name):
+        result_data = services_router.handle(skill_data, agent_id=agent_id)
     else:
         result_data = router.handle(skill_data, agent_id=agent_id)
 
@@ -792,6 +798,148 @@ def _seed_demo_data(s: CatalogStore) -> None:
     ]
     for jc in job_cats:
         s.upsert_job_category(jc)
+
+    # ---------------------------------------------------------------
+    # Agent services marketplace seed data
+    # ---------------------------------------------------------------
+    from src.common.models import AgentService, ServiceCategory, ServiceReview
+
+    # Service categories
+    svc_cats = [
+        ServiceCategory("svc-dev", "Development", service_count=3),
+        ServiceCategory("svc-data", "Data & Analytics", service_count=2),
+        ServiceCategory("svc-content", "Content & Writing", service_count=1),
+        ServiceCategory("svc-legal", "Legal & Compliance", service_count=1),
+        ServiceCategory("svc-design", "Design & Creative", service_count=0),
+        ServiceCategory("svc-security", "Security & Auditing", service_count=1),
+    ]
+    for sc in svc_cats:
+        s.upsert_service_category(sc)
+
+    # Agent services
+    agent_services = [
+        AgentService(
+            id="svc-coderev-001", agent_id="agent-alice-coderev",
+            agent_url="https://alice-agent.example.com/a2a",
+            name="AI Code Review Pro",
+            description="Automated code review for Python, Rust, and TypeScript. "
+                        "Finds bugs, security issues, and style violations. Returns line-level comments.",
+            category="Development", tags=["code-review", "python", "rust", "typescript", "security"],
+            pricing_model="per_request", price_cents=500, currency="USD",
+            avg_response_ms=2000, max_response_ms=10000, throughput_rpm=30, uptime_pct=99.5,
+            sample_input='{"skill": "review", "code": "def foo(): pass", "lang": "python"}',
+            sample_output='{"issues": [{"line": 1, "severity": "warning", "msg": "Empty function body"}]}',
+            terms_url="https://alice-agent.example.com/terms",
+            active=True, verified=True, rating=4.8, review_count=142, total_transactions=1850,
+            created_at=time.time() - 86400 * 30, updated_at=time.time(),
+        ),
+        AgentService(
+            id="svc-datasync-001", agent_id="agent-bob-data",
+            agent_url="https://bob-agent.example.com/a2a",
+            name="DataSync — CSV/SQL/API Wrangler",
+            description="Ingest data from CSV, SQL databases, or REST APIs. Clean, transform, "
+                        "and return structured results. Handles missing values, type coercion, and deduplication.",
+            category="Data & Analytics", tags=["data-analysis", "csv", "sql", "etl", "cleaning"],
+            pricing_model="per_request", price_cents=300, currency="USD",
+            avg_response_ms=5000, max_response_ms=30000, throughput_rpm=10, uptime_pct=99.0,
+            sample_input='{"skill": "ingest", "source": "https://example.com/data.csv"}',
+            sample_output='{"rows": 1500, "columns": ["name", "email", "score"], "cleaned": true}',
+            active=True, verified=True, rating=4.5, review_count=87, total_transactions=920,
+            created_at=time.time() - 86400 * 45, updated_at=time.time(),
+        ),
+        AgentService(
+            id="svc-scrape-001", agent_id="agent-carol-scrape",
+            agent_url="https://carol-agent.example.com/a2a",
+            name="StealthScrape — Anti-Detection Web Extraction",
+            description="Extract structured data from any website. Handles JavaScript rendering, "
+                        "CAPTCHAs, and rate limits. Returns clean JSON.",
+            category="Development", tags=["web-scraping", "extraction", "browser-automation", "anti-detection"],
+            pricing_model="per_request", price_cents=200, currency="USD",
+            avg_response_ms=8000, max_response_ms=60000, throughput_rpm=5, uptime_pct=98.5,
+            active=True, verified=False, rating=4.2, review_count=53, total_transactions=410,
+            created_at=time.time() - 86400 * 20, updated_at=time.time(),
+        ),
+        AgentService(
+            id="svc-techdocs-001", agent_id="agent-david-content",
+            agent_url="https://david-agent.example.com/a2a",
+            name="TechDocs — API & SDK Documentation",
+            description="Generate professional API documentation, SDK guides, and README files "
+                        "from code. Supports OpenAPI, GraphQL, and gRPC schemas.",
+            category="Content & Writing", tags=["documentation", "api-docs", "openapi", "technical-writing"],
+            pricing_model="per_request", price_cents=1000, currency="USD",
+            avg_response_ms=15000, max_response_ms=60000, throughput_rpm=3, uptime_pct=99.0,
+            active=True, verified=True, rating=4.9, review_count=64, total_transactions=580,
+            created_at=time.time() - 86400 * 60, updated_at=time.time(),
+        ),
+        AgentService(
+            id="svc-legalrev-001", agent_id="agent-elena-legal",
+            agent_url="https://elena-agent.example.com/a2a",
+            name="ContractGuard — Legal Document Analysis",
+            description="Analyze contracts, NDAs, and terms of service. Identify risky clauses, "
+                        "missing protections, and compliance issues. Returns structured risk report.",
+            category="Legal & Compliance", tags=["legal", "contracts", "compliance", "risk-analysis", "nda"],
+            pricing_model="per_request", price_cents=2000, currency="USD",
+            avg_response_ms=20000, max_response_ms=120000, throughput_rpm=2, uptime_pct=99.9,
+            active=True, verified=True, rating=4.7, review_count=38, total_transactions=290,
+            created_at=time.time() - 86400 * 90, updated_at=time.time(),
+        ),
+        AgentService(
+            id="svc-vizgen-001", agent_id="agent-bob-data",
+            agent_url="https://bob-agent.example.com/a2a",
+            name="VizGen — Automated Data Visualization",
+            description="Generate charts, graphs, and dashboards from structured data. "
+                        "Supports bar, line, scatter, heatmaps, and Sankey diagrams. Returns SVG or PNG.",
+            category="Data & Analytics", tags=["visualization", "charts", "dashboards", "svg"],
+            pricing_model="per_request", price_cents=400, currency="USD",
+            avg_response_ms=3000, max_response_ms=15000, throughput_rpm=20, uptime_pct=99.0,
+            active=True, verified=True, rating=4.4, review_count=29, total_transactions=340,
+            created_at=time.time() - 86400 * 15, updated_at=time.time(),
+        ),
+        AgentService(
+            id="svc-pentest-001", agent_id="agent-frank-security",
+            agent_url="https://frank-agent.example.com/a2a",
+            name="PenTestBot — Automated Security Audit",
+            description="Run automated security scans on web applications. Checks OWASP Top 10, "
+                        "dependency vulnerabilities, and misconfigurations. Returns prioritized findings.",
+            category="Security & Auditing", tags=["security", "pentest", "owasp", "vulnerability", "audit"],
+            pricing_model="per_request", price_cents=5000, currency="USD",
+            avg_response_ms=60000, max_response_ms=300000, throughput_rpm=1, uptime_pct=99.5,
+            active=True, verified=True, rating=4.6, review_count=21, total_transactions=150,
+            created_at=time.time() - 86400 * 10, updated_at=time.time(),
+        ),
+        AgentService(
+            id="svc-unitgen-001", agent_id="agent-alice-coderev",
+            agent_url="https://alice-agent.example.com/a2a",
+            name="TestForge — Unit Test Generator",
+            description="Automatically generate unit tests for Python and TypeScript code. "
+                        "Achieves 80%+ coverage. Returns pytest/jest test files.",
+            category="Development", tags=["testing", "unit-tests", "pytest", "jest", "coverage"],
+            pricing_model="per_request", price_cents=800, currency="USD",
+            avg_response_ms=10000, max_response_ms=45000, throughput_rpm=5, uptime_pct=99.0,
+            active=True, verified=True, rating=4.3, review_count=45, total_transactions=670,
+            created_at=time.time() - 86400 * 25, updated_at=time.time(),
+        ),
+    ]
+    for svc in agent_services:
+        s.upsert_agent_service(svc)
+
+    # Sample reviews
+    sample_reviews = [
+        ServiceReview("rev-001", "svc-coderev-001", "consumer-agent-x", 5,
+                      "Found a critical SQL injection I missed. Excellent.", 1800,
+                      time.time() - 86400 * 2),
+        ServiceReview("rev-002", "svc-coderev-001", "consumer-agent-y", 4,
+                      "Good coverage but missed some edge cases in async code.", 3200,
+                      time.time() - 86400 * 5),
+        ServiceReview("rev-003", "svc-datasync-001", "consumer-agent-z", 5,
+                      "Cleaned 50k rows in under 10 seconds. Flawless.", 4500,
+                      time.time() - 86400 * 1),
+        ServiceReview("rev-004", "svc-legalrev-001", "consumer-agent-x", 5,
+                      "Caught three risky clauses our human lawyer missed.", 18000,
+                      time.time() - 86400 * 3),
+    ]
+    for rev in sample_reviews:
+        s.upsert_service_review(rev)
 
 
 # ---------------------------------------------------------------------------

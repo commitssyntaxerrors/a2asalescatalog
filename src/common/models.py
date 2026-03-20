@@ -573,3 +573,75 @@ JOB_SEARCH_FIELDS = [
     "employment_type", "salary_min_cents", "salary_max_cents",
 ]
 JOB_CATEGORY_FIELDS = ["id", "label", "job_count"]
+
+
+# ---------------------------------------------------------------------------
+# Agent services marketplace — agents listing own services for sale
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class AgentService:
+    """A service listed by an autonomous agent for sale to other agents.
+
+    Unlike the directory (human registers profile → agent endpoint),
+    here the *agent itself* lists services with pricing, SLAs,
+    and terms — operating independently as a service provider.
+    """
+    id: str
+    agent_id: str           # ID of the agent selling the service
+    agent_url: str          # A2A endpoint
+    name: str               # Service name (e.g., "AI Code Review")
+    description: str        # What the service does
+    category: str = ""      # Service category tag
+    tags: list[str] = field(default_factory=list)  # Searchable tags
+    # Pricing
+    pricing_model: str = "per_request"  # per_request, per_hour, per_token, flat, subscription
+    price_cents: int = 0                # Base price in cents
+    currency: str = "USD"
+    # SLA / capabilities
+    avg_response_ms: int = 0            # Typical response time
+    max_response_ms: int = 0            # SLA upper bound
+    throughput_rpm: int = 0             # Max requests per minute
+    uptime_pct: float = 0.0            # Advertised uptime (e.g. 99.9)
+    # Metadata
+    input_modes: list[str] = field(default_factory=lambda: ["application/json"])
+    output_modes: list[str] = field(default_factory=lambda: ["application/json"])
+    sample_input: str = ""   # Example request JSON
+    sample_output: str = ""  # Example response JSON
+    terms_url: str = ""      # Link to terms of service
+    # Status
+    active: bool = True
+    verified: bool = False   # Server has validated the endpoint
+    rating: float = 0.0      # Aggregate rating (0-5)
+    review_count: int = 0
+    total_transactions: int = 0
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class ServiceReview:
+    """A review of an agent service from a consumer agent."""
+    id: str
+    service_id: str
+    reviewer_agent_id: str
+    rating: int             # 1-5
+    comment: str = ""
+    response_ms: int = 0    # Observed response time
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class ServiceCategory:
+    id: str
+    label: str
+    parent_id: str | None = None
+    service_count: int = 0
+
+
+SERVICE_SEARCH_FIELDS = [
+    "id", "name", "agent_id", "category", "pricing_model",
+    "price_cents", "rating", "verified", "active",
+]
+SERVICE_CATEGORY_FIELDS = ["id", "label", "service_count"]
+SERVICE_REVIEW_FIELDS = ["id", "reviewer_agent_id", "rating", "comment", "created_at"]
