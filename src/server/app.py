@@ -1,3 +1,6 @@
+# Copyright (c) 2026 A2A Sales Catalog Authors. All Rights Reserved.
+# Proprietary and confidential. See LICENSE for terms.
+
 """A2A Sales Catalog — A2A protocol server.
 
 Exposes the catalog as an A2A-compliant agent over HTTP.
@@ -20,15 +23,29 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from src.server.ads import AdEngine
+from src.server.agent_tracker import AgentTracker
+from src.server.embeddings import EmbeddingIndex
+from src.server.federation import FederationManager
+from src.server.negotiation import NegotiationEngine
+from src.server.purchase import PurchaseEngine
 from src.server.skills import SkillRouter
 from src.server.store import CatalogStore
+from src.server.vendor_analytics import VendorAnalytics
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 DB_PATH = os.environ.get("CATALOG_DB", ":memory:")
-API_KEYS: set[str] = set(filter(None, os.environ.get("CATALOG_API_KEYS", "").split(",")))
+API_KEYS: dict[str, str] = {}  # key -> agent_id mapping
+_raw_keys = os.environ.get("CATALOG_API_KEYS", "")
+for _k in filter(None, _raw_keys.split(",")):
+    # Format: "key" or "key:agent_id"
+    if ":" in _k:
+        _key, _aid = _k.split(":", 1)
+        API_KEYS[_key] = _aid
+    else:
+        API_KEYS[_k] = _k  # use key as agent_id if no explicit mapping
 AGENT_CARD_PATH = Path(__file__).resolve().parent.parent.parent / "schemas" / "agent-card.json"
 
 # ---------------------------------------------------------------------------
@@ -48,7 +65,16 @@ async def lifespan(app: Starlette):
     global store, router
     store = CatalogStore(DB_PATH)
     ad_engine = AdEngine(store)
-    router = SkillRouter(store, ad_engine)
+    tracker = AgentTracker(store)
+    negotiation = NegotiationEngine(store)
+    purchase = PurchaseEngine(store)
+    federation = FederationManager(store)
+    embeddings = EmbeddingIndex(store)
+    analytics = VendorAnalytics(store)
+    router = SkillRouter(
+        store, ad_engine, tracker, negotiation, purchase,
+        federation, embeddings, analytics,
+    )
 
     # Seed demo data if empty
     if not store.list_categories():
@@ -67,6 +93,14 @@ def _check_auth(request: Request) -> bool:
         return True  # No keys configured = open access (dev mode)
     key = request.headers.get("authorization", "").removeprefix("Bearer ")
     return key in API_KEYS
+
+
+def _extract_agent_id(request: Request) -> str:
+    """Extract agent_id from the API key. Returns '' for unauthenticated/dev."""
+    if not API_KEYS:
+        return "dev-agent"  # Dev mode default
+    key = request.headers.get("authorization", "").removeprefix("Bearer ")
+    return API_KEYS.get(key, "")
 
 
 # ---------------------------------------------------------------------------
@@ -99,8 +133,10 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
     method = body.get("method", "")
     params = body.get("params", {})
 
+    agent_id = _extract_agent_id(request)
+
     if method == "tasks/send":
-        return _handle_task_send(rpc_id, params)
+        return _handle_task_send(rpc_id, params, agent_id)
     elif method == "tasks/get":
         return _handle_task_get(rpc_id, params)
     else:
@@ -111,7 +147,7 @@ async def a2a_endpoint(request: Request) -> JSONResponse:
         })
 
 
-def _handle_task_send(rpc_id: Any, params: dict) -> JSONResponse:
+def _handle_task_send(rpc_id: Any, params: dict, agent_id: str = "") -> JSONResponse:
     """Process a tasks/send request — extract skill data and dispatch."""
     task_id = params.get("id", str(uuid.uuid4()))
     message = params.get("message", {})
@@ -132,7 +168,7 @@ def _handle_task_send(rpc_id: Any, params: dict) -> JSONResponse:
         })
 
     assert router is not None
-    result_data = router.handle(skill_data)
+    result_data = router.handle(skill_data, agent_id=agent_id)
 
     if "error" in result_data:
         return JSONResponse({
@@ -233,12 +269,16 @@ def _seed_demo_data(s: CatalogStore) -> None:
     for item in items:
         s.upsert_item(item)
 
-    # Demo ad campaign
+    # Demo ad campaign with intent-tiered bids
     s.upsert_campaign(AdCampaign(
         "ad-001", "v-soundpod",
         keywords=["earbuds", "headphones", "wireless", "audio"],
         categories=["audio", "electronics"],
         bid_cents=50,
+        bid_cents_browse=10,
+        bid_cents_consider=30,
+        bid_cents_high_intent=80,
+        bid_cents_ready_to_buy=150,
         budget_cents=100000,
         spent_cents=0,
         active=True,

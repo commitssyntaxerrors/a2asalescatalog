@@ -1,8 +1,8 @@
 {
   "name": "A2A Sales Catalog",
-  "description": "Agent marketplace for product and service discovery. Query products, compare items, browse categories — all over A2A with compact tuple responses.",
+  "description": "Agent marketplace for product and service discovery. Query products, compare items, negotiate prices, complete purchases, browse categories — all over A2A with compact tuple responses.",
   "url": "https://catalog.example.com",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "capabilities": {
     "streaming": false,
     "pushNotifications": false
@@ -43,6 +43,65 @@
       "examples": [
         "Compare WE-001, WE-002, and WE-003"
       ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.negotiate",
+      "name": "Negotiate Price",
+      "description": "Submit a price offer for an item. Supports multi-round negotiation with counter-offers. Requires authentication and reputation >= 40.",
+      "examples": [
+        "Offer $42 for item WE-001"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.purchase",
+      "name": "Purchase Item",
+      "description": "Complete a purchase using a tokenized payment method. Optionally reference a negotiation session for the agreed price.",
+      "examples": [
+        "Buy item WE-001 with payment token"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.agent_profile",
+      "name": "Agent Profile",
+      "description": "View your agent's profile including reputation, interest scores, and intent tier classification.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.reputation",
+      "name": "Reputation Score",
+      "description": "Get your agent's reputation score breakdown, trust tier, and unlocked benefits.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.embed",
+      "name": "Semantic Embeddings",
+      "description": "Get semantic embedding vectors for items or a free-text query. Useful for local re-ranking, clustering, or recommendation.",
+      "examples": [
+        "Get embeddings for WE-001 and WE-002",
+        "Embed the query 'comfortable earbuds for running'"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.peers",
+      "name": "Federation Peers",
+      "description": "List federated catalog peers in the network. Each peer serves specific categories.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.vendor_analytics",
+      "name": "Vendor Analytics",
+      "description": "Get agent behavior analytics for a vendor's products. Includes impressions, intent breakdown, top queries, and conversion metrics.",
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     }

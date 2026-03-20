@@ -1,3 +1,6 @@
+# Copyright (c) 2026 A2A Sales Catalog Authors. All Rights Reserved.
+# Proprietary and confidential. See LICENSE for terms.
+
 """A2A Sales Catalog — Ad engine.
 
 Handles sponsored result insertion and attribution.
@@ -26,11 +29,23 @@ class AdEngine:
         query: str,
         category: str | None = None,
         limit: int = 10,
+        *,
+        intent_tier: str = "browse",
     ) -> list[dict[str, Any]]:
-        """Insert sponsored items into organic results respecting the cap."""
+        """Insert sponsored items into organic results respecting the cap.
+
+        Uses intent-tiered bidding: campaigns bid differently per intent tier
+        (browse < consider < high_intent < ready_to_buy).
+        """
         campaigns = self._store.get_matching_campaigns(query, category)
         if not campaigns:
             return organic_results
+
+        # Sort campaigns by intent-tiered bid instead of flat bid
+        bid_key = f"bid_cents_{intent_tier}"
+        for camp in campaigns:
+            camp["_effective_bid"] = camp.get(bid_key, 0) or camp.get("bid_cents", 0)
+        campaigns.sort(key=lambda x: x["_effective_bid"], reverse=True)
 
         organic_ids = {r["id"] for r in organic_results}
         max_sponsored = max(1, int(limit * MAX_SPONSORED_RATIO))

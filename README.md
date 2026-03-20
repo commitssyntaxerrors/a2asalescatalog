@@ -76,6 +76,13 @@ python -m examples.consumer_agent
 | `catalog.lookup` | Get full details for a single item by ID |
 | `catalog.categories` | Browse product/service categories |
 | `catalog.compare` | Side-by-side comparison of multiple items |
+| `catalog.negotiate` | Multi-round price negotiation (reputation ≥ 40 required) |
+| `catalog.purchase` | Complete a purchase with tokenized payment |
+| `catalog.agent_profile` | View agent profile, interest scores, intent tier |
+| `catalog.reputation` | Get agent reputation breakdown and trust tier |
+| `catalog.embed` | Semantic embedding vectors for items/queries |
+| `catalog.peers` | List federated catalog peers |
+| `catalog.vendor_analytics` | Agent behavior analytics for vendors |
 
 ### Agent Card
 
@@ -88,26 +95,32 @@ The server publishes an A2A Agent Card at `GET /.well-known/agent.json` — this
 ```
 a2asalescatalog/
 ├── docs/
-│   └── SPEC.md              # Full specification sheet
+│   └── SPEC.md                # Full specification sheet
 ├── schemas/
-│   ├── agent-card.json       # A2A Agent Card definition
-│   ├── search-request.json   # JSON Schema for search input
-│   ├── search-response.json  # JSON Schema for search output
-│   ├── lookup-request.json   # JSON Schema for lookup input
+│   ├── agent-card.json        # A2A Agent Card definition
+│   ├── search-request.json    # JSON Schema for search input
+│   ├── search-response.json   # JSON Schema for search output
+│   ├── lookup-request.json    # JSON Schema for lookup input
 │   ├── categories-request.json
 │   └── compare-request.json
 ├── src/
 │   ├── common/
-│   │   └── models.py         # Shared data models & tuple encoders
+│   │   └── models.py            # Shared data models & tuple encoders
 │   ├── server/
-│   │   ├── app.py            # Starlette A2A server
-│   │   ├── store.py          # SQLite FTS5 data store
-│   │   ├── skills.py         # Skill handlers (search, lookup, etc.)
-│   │   └── ads.py            # Ad engine — sponsored insertion
+│   │   ├── app.py               # Starlette A2A server
+│   │   ├── store.py             # SQLite FTS5 data store
+│   │   ├── skills.py            # Skill handlers (11 skills)
+│   │   ├── ads.py               # Ad engine — intent-tiered bidding
+│   │   ├── agent_tracker.py     # Agent tracking & interest scoring
+│   │   ├── negotiation.py       # Programmatic price negotiation
+│   │   ├── purchase.py          # Purchase completion protocol
+│   │   ├── federation.py        # Federated catalog network
+│   │   ├── embeddings.py        # Semantic embeddings index
+│   │   └── vendor_analytics.py  # Vendor-facing analytics
 │   └── client/
-│       └── catalog_client.py # Consumer agent SDK
+│       └── catalog_client.py    # Consumer agent SDK
 ├── examples/
-│   └── consumer_agent.py     # Example agent integration
+│   └── consumer_agent.py      # Example agent integration
 ├── tests/
 ├── pyproject.toml
 └── README.md
@@ -145,5 +158,12 @@ See [docs/SPEC.md](docs/SPEC.md) for the full specification including milestones
 
 ## License
 
-- **Schemas, spec, and protocol definitions** (`schemas/`, `docs/`) — [Apache 2.0](schemas/LICENSE)
-- **Server, client SDK, and implementation** — [Business Source License 1.1](LICENSE) (converts to Apache 2.0 on 2030-03-19)
+> **Copyright © 2026 A2A Sales Catalog Authors. All Rights Reserved.**
+>
+> **PROPRIETARY SOFTWARE — NOT OPEN SOURCE.**
+>
+> No license is granted to use, copy, modify, or distribute this software.
+> The source code is publicly visible solely to establish prior art and
+> timestamp intellectual property. See [LICENSE](LICENSE) for full terms.
+>
+> For licensing inquiries, contact the copyright holder(s).

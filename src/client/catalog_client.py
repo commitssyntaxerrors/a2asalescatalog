@@ -1,3 +1,6 @@
+# Copyright (c) 2026 A2A Sales Catalog Authors. All Rights Reserved.
+# Proprietary and confidential. See LICENSE for terms.
+
 """A2A Sales Catalog — lightweight client SDK.
 
 Allows any agent orchestrator to query the catalog with a single function call.
@@ -66,6 +69,81 @@ class CatalogClient:
     def compare(self, ids: list[str]) -> dict[str, Any]:
         """Compare items side by side."""
         return self._send_task({"skill": "catalog.compare", "ids": ids})
+
+    def negotiate(
+        self,
+        item_id: str,
+        offer_cents: int,
+        session_id: str | None = None,
+        message: str = "",
+    ) -> dict[str, Any]:
+        """Negotiate a price for an item."""
+        data: dict[str, Any] = {
+            "skill": "catalog.negotiate",
+            "item_id": item_id,
+            "offer_cents": offer_cents,
+        }
+        if session_id:
+            data["session_id"] = session_id
+        if message:
+            data["message"] = message
+        return self._send_task(data)
+
+    def purchase(
+        self,
+        item_id: str,
+        payment_token: str,
+        *,
+        quantity: int = 1,
+        negotiate_session_id: str | None = None,
+        shipping_method: str = "standard",
+        address_token: str = "",
+    ) -> dict[str, Any]:
+        """Complete a purchase."""
+        data: dict[str, Any] = {
+            "skill": "catalog.purchase",
+            "item_id": item_id,
+            "quantity": quantity,
+            "payment_token": payment_token,
+        }
+        if negotiate_session_id:
+            data["negotiate_session_id"] = negotiate_session_id
+        if shipping_method or address_token:
+            data["shipping"] = {"method": shipping_method, "address_token": address_token}
+        return self._send_task(data)
+
+    def agent_profile(self) -> dict[str, Any]:
+        """Get the authenticated agent's profile and interest scores."""
+        return self._send_task({"skill": "catalog.agent_profile"})
+
+    def reputation(self) -> dict[str, Any]:
+        """Get the authenticated agent's reputation score and tier."""
+        return self._send_task({"skill": "catalog.reputation"})
+
+    def embed(
+        self,
+        ids: list[str] | None = None,
+        query: str = "",
+    ) -> dict[str, Any]:
+        """Get semantic embeddings for items or a query."""
+        data: dict[str, Any] = {"skill": "catalog.embed"}
+        if ids:
+            data["ids"] = ids
+        if query:
+            data["query"] = query
+        return self._send_task(data)
+
+    def peers(self) -> dict[str, Any]:
+        """List federated catalog peers."""
+        return self._send_task({"skill": "catalog.peers"})
+
+    def vendor_analytics(self, vendor_id: str, period: str = "7d") -> dict[str, Any]:
+        """Get vendor analytics report."""
+        return self._send_task({
+            "skill": "catalog.vendor_analytics",
+            "vendor_id": vendor_id,
+            "period": period,
+        })
 
     # ------------------------------------------------------------------
     # Helpers to decode compact responses

@@ -241,9 +241,442 @@ Get full details for a single item.
 
 ---
 
-## 6. Advertising Model
+## 6. Agent Identity, Tracking & Interest Scoring
 
-### 6.1 How It Works
+### 6.1 Agent Identity
+
+Every consumer agent authenticates with an API key. The catalog assigns each key a unique **agent fingerprint** (`agent_id`) used to track behavior across sessions without exposing PII.
+
+### 6.2 Repeat Visit Tracking
+
+The catalog logs every query per `agent_id`:
+
+| Event | Tracked Fields |
+|---|---|
+| Search | agent_id, query, category, timestamp |
+| Lookup | agent_id, item_id, timestamp |
+| Compare | agent_id, item_ids, timestamp |
+| Negotiate | agent_id, item_id, offer, timestamp |
+| Purchase | agent_id, item_id, amount, timestamp |
+
+### 6.3 Interest Scoring Algorithm
+
+Each agent accumulates an **interest score** per item and category based on repeat behavior:
+
+```
+interest_score = (
+    search_hits × 1.0 +
+    lookups × 3.0 +
+    compares × 2.0 +
+    negotiations × 5.0 +
+    repeat_visits × 2.0 +    # same item viewed 2+ times
+    recency_boost              # decay: score × 0.9^(days_since_last)
+)
+```
+
+### 6.4 Intent Tiers
+
+Based on the interest score, agents are classified into intent tiers:
+
+| Tier | Score Range | Behavior |
+|---|---|---|
+| **Browse** | 0–5 | Casual browsing — standard results |
+| **Consider** | 6–15 | Active comparison — results pre-cached, richer attrs returned |
+| **High-Intent** | 16–30 | Likely to buy — vendors notified, priority response, negotiation enabled |
+| **Ready-to-Buy** | 31+ | Imminent purchase — purchase protocol unlocked, exclusive offers surfaced |
+
+### 6.5 Intent-Aware Advertising
+
+Advertisers can bid differently per intent tier:
+
+```json
+{
+  "bid_cents_browse": 5,
+  "bid_cents_consider": 15,
+  "bid_cents_high_intent": 50,
+  "bid_cents_ready_to_buy": 100
+}
+```
+
+High-intent queries cost more per-impression but convert at higher rates. This tiered bidding is the core monetization innovation — **ads priced by demonstrated agent purchase intent**.
+
+### 6.6 `catalog.agent_profile` Skill
+
+Agents can query their own profile to see their interest scores and intent tier:
+
+**Input:**
+```json
+{
+  "skill": "catalog.agent_profile"
+}
+```
+
+**Output:**
+```json
+{
+  "agent_id": "a-f7e2c",
+  "reputation": 82,
+  "intent_tier": "high_intent",
+  "total_queries": 147,
+  "top_interests": [
+    ["audio", 24.5],
+    ["electronics", 12.3]
+  ],
+  "item_interests": [
+    ["WE-001", 18.0, "high_intent"],
+    ["WE-003", 9.5, "consider"]
+  ]
+}
+```
+
+---
+
+## 7. Agent Reputation & Trust Scores
+
+### 7.1 Reputation Model
+
+Each consumer agent builds a reputation score (0–100) based on:
+
+| Factor | Weight | Description |
+|---|---|---|
+| Account age | +0.1/day | Longevity bonus (max 10) |
+| Completed purchases | +5.0 each | Proves genuine commerce activity |
+| Query consistency | +0.5 | Non-abusive query patterns |
+| Vendor feedback | ±10.0 | Vendors rate agent interactions |
+| Negotiation honor | +3.0 | Completing deals after negotiating |
+| Violation penalties | -20.0 | Rate limit abuse, ToS violations |
+
+### 7.2 Trust-Based Pricing
+
+Vendors can offer tiered pricing based on agent reputation:
+
+```json
+{
+  "price_cents": 4999,
+  "trusted_price_cents": 4499,
+  "reputation_threshold": 60
+}
+```
+
+### 7.3 `catalog.reputation` Skill
+
+**Input:**
+```json
+{
+  "skill": "catalog.reputation"
+}
+```
+
+**Output:**
+```json
+{
+  "agent_id": "a-f7e2c",
+  "score": 82,
+  "factors": [["age", 10], ["purchases", 45], ["consistency", 15], ["feedback", 12]],
+  "tier": "trusted",
+  "benefits": ["trusted_pricing", "priority_response", "negotiation_access"]
+}
+```
+
+---
+
+## 8. Negotiation Protocol
+
+### 8.1 Overview
+
+Consumer agents can negotiate prices with the catalog (acting on behalf of vendors). This is **programmatic haggling** — the first structured negotiation protocol between AI agents for commerce.
+
+### 8.2 Negotiation Flow
+
+```
+Consumer Agent                    Catalog Server
+     │                                 │
+     ├── catalog.negotiate ──────────► │  (initial offer)
+     │                                 │
+     │ ◄── counter / accept / reject ──┤
+     │                                 │
+     ├── catalog.negotiate ──────────► │  (counter-offer)
+     │                                 │
+     │ ◄── accept ─────────────────────┤
+     │                                 │
+     ├── catalog.purchase ───────────► │  (complete at agreed price)
+     │                                 │
+```
+
+### 8.3 `catalog.negotiate` Skill
+
+**Input:**
+```json
+{
+  "skill": "catalog.negotiate",
+  "item_id": "WE-001",
+  "offer_cents": 4200,
+  "session_id": null,
+  "message": "Buying 3 units, looking for volume discount"
+}
+```
+
+**Output:**
+```json
+{
+  "session_id": "neg-a1b2c3",
+  "status": "counter",
+  "their_offer_cents": 4600,
+  "your_offer_cents": 4200,
+  "list_price_cents": 4999,
+  "rounds_left": 2,
+  "message": "We can offer 8% off for volume. Counter: $46.00"
+}
+```
+
+### 8.4 Negotiation Rules
+
+| Rule | Value |
+|---|---|
+| Max rounds per session | 5 |
+| Min offer (floor) | 60% of list price |
+| Auto-accept threshold | Within 5% of vendor floor |
+| Reputation required | Score ≥ 40 |
+| Session expiry | 1 hour |
+
+---
+
+## 9. Purchase Completion Protocol
+
+### 9.1 Overview
+
+Close the sale agent-to-agent. After discovery (search/lookup) and optional negotiation, the consumer agent can initiate a purchase entirely over A2A.
+
+### 9.2 `catalog.purchase` Skill
+
+**Input:**
+```json
+{
+  "skill": "catalog.purchase",
+  "item_id": "WE-001",
+  "quantity": 1,
+  "negotiate_session_id": "neg-a1b2c3",
+  "payment_token": "pay_tok_xxxxx",
+  "shipping": {
+    "method": "standard",
+    "address_token": "addr_tok_xxxxx"
+  }
+}
+```
+
+**Output:**
+```json
+{
+  "order_id": "ord-x7y8z9",
+  "status": "confirmed",
+  "item_id": "WE-001",
+  "quantity": 1,
+  "unit_price_cents": 4600,
+  "total_cents": 4600,
+  "payment_status": "captured",
+  "estimated_delivery": "2026-03-25",
+  "tracking_url": "https://track.example.com/ord-x7y8z9"
+}
+```
+
+### 9.3 Purchase Flow Security
+
+| Concern | Mitigation |
+|---|---|
+| Payment credentials | Tokenized — catalog never sees raw card/bank data |
+| Shipping address | Tokenized via address_token — PII never in transit |
+| Replay attacks | Idempotency key in order_id + negotiate_session_id |
+| Price manipulation | Final price locked by negotiate session or list price |
+
+---
+
+## 10. Federated Catalog Network
+
+### 10.1 Overview
+
+Multiple catalog servers can **peer with each other** and cross-list inventory — like DNS for product catalogs. No single point of failure, no centralized chokepoint.
+
+### 10.2 Federation Protocol
+
+Each catalog publishes peering information in its Agent Card:
+
+```json
+{
+  "federation": {
+    "enabled": true,
+    "peers": [
+      "https://electronics.catalog.example.com",
+      "https://fashion.catalog.example.com"
+    ],
+    "accept_peers": true,
+    "categories_served": ["electronics", "audio"]
+  }
+}
+```
+
+### 10.3 Cross-Catalog Search
+
+When a query doesn't match local inventory, the catalog can fan-out to peers:
+
+```
+Consumer Agent ──► Catalog A ──► local results
+                       │
+                       ├──► Catalog B ──► peer results
+                       │
+                       └──► Catalog C ──► peer results
+                       │
+                  ◄── merged, deduplicated, ranked
+```
+
+### 10.4 `catalog.peers` Skill
+
+**Input:**
+```json
+{
+  "skill": "catalog.peers"
+}
+```
+
+**Output:**
+```json
+{
+  "fields": ["url", "name", "categories", "items_count", "status"],
+  "peers": [
+    ["https://electronics.catalog.example.com", "ElectroCat", ["electronics"], 48000, "online"],
+    ["https://fashion.catalog.example.com", "StyleAgent", ["fashion"], 31000, "online"]
+  ]
+}
+```
+
+---
+
+## 11. Semantic Embeddings Index
+
+### 11.1 Overview
+
+Each item in the catalog has a pre-computed **semantic embedding vector**. Consumer agents can request embeddings alongside search results to perform local re-ranking, clustering, or recommendation without extra round-trips.
+
+### 11.2 Embedding Format
+
+Embeddings are compact float32 arrays, base64-encoded for wire efficiency:
+
+```json
+{
+  "skill": "catalog.search",
+  "q": "wireless earbuds",
+  "include_embeddings": true
+}
+```
+
+Response includes an `emb` field per item tuple:
+
+```json
+{
+  "fields": ["id","name","desc","price_cents","vendor","rating","sponsored","ad_tag","emb"],
+  "items": [
+    ["WE-001","SoundPod Pro","...",4999,"soundpod.com",4.6,1,"sp","base64..."]
+  ]
+}
+```
+
+### 11.3 `catalog.embed` Skill
+
+Get embeddings for specific items or a free-text query:
+
+**Input:**
+```json
+{
+  "skill": "catalog.embed",
+  "ids": ["WE-001", "WE-002"],
+  "query": "comfortable earbuds for running"
+}
+```
+
+**Output:**
+```json
+{
+  "dim": 128,
+  "query_emb": "base64...",
+  "items": [
+    ["WE-001", "base64..."],
+    ["WE-002", "base64..."]
+  ]
+}
+```
+
+### 11.4 Use Cases
+
+- **Local re-ranking**: Agent re-sorts results by cosine similarity to its own preference vector
+- **Clustering**: Agent groups similar products without additional API calls
+- **Recommendation**: Agent builds a preference profile from past embeddings
+
+---
+
+## 12. Vendor Analytics
+
+### 12.1 Overview
+
+Vendors get analytics on **agent behavior** — not human behavior. This is a new class of analytics that doesn't exist today.
+
+### 12.2 `catalog.vendor_analytics` Skill
+
+**Input (vendor-authenticated):**
+```json
+{
+  "skill": "catalog.vendor_analytics",
+  "vendor_id": "v-soundpod",
+  "period": "7d"
+}
+```
+
+**Output:**
+```json
+{
+  "vendor_id": "v-soundpod",
+  "period": "7d",
+  "summary": {
+    "total_impressions": 12847,
+    "unique_agents": 3421,
+    "lookups": 1893,
+    "comparisons": 647,
+    "negotiations": 89,
+    "purchases": 34,
+    "conversion_rate": 0.026
+  },
+  "top_queries": [
+    ["wireless earbuds", 4521],
+    ["noise cancelling", 2103],
+    ["running earbuds", 1847]
+  ],
+  "comparison_losses": [
+    ["WE-002", 234, "price"],
+    ["WE-003", 189, "rating"]
+  ],
+  "agent_intent_breakdown": {
+    "browse": 2100,
+    "consider": 890,
+    "high_intent": 341,
+    "ready_to_buy": 90
+  },
+  "repeat_agent_rate": 0.41
+}
+```
+
+### 12.3 Analytics Insights
+
+| Metric | What it tells vendors |
+|---|---|
+| `comparison_losses` | Which competitors they lose to and why |
+| `agent_intent_breakdown` | How many agents are close to buying |
+| `repeat_agent_rate` | Percentage of agents that come back |
+| `top_queries` | What terms drive traffic to their products |
+| `conversion_rate` | Search-to-purchase funnel efficiency |
+
+---
+
+## 13. Advertising Model
+
+### 13.1 How It Works
 
 1. **Vendors register** and list products for free (organic listings).
 2. **Advertisers bid** on keywords/categories for promoted placement.
@@ -253,14 +686,14 @@ Get full details for a single item.
    - Marks every sponsored result with `sponsored: 1`
 4. Advertisers are charged **per-impression** (result served) or **per-action** (buy_url clicked).
 
-### 6.2 Trust Contract
+### 13.2 Trust Contract
 
 - Sponsored results are **always marked** — agents that strip or hide the flag violate ToS.
 - Organic results are **never suppressed** — sponsored items supplement, not replace.
 - The ratio of sponsored to organic is capped (default: max 2 sponsored per 10 results).
 - Agents may request `sponsored: 0` to exclude all ads (premium tier).
 
-### 6.3 Revenue Tiers
+### 13.3 Revenue Tiers
 
 | Tier | Cost | Sponsored | Rate Limit |
 |---|---|---|---|
@@ -270,7 +703,7 @@ Get full details for a single item.
 
 ---
 
-## 7. Architecture Overview
+## 14. Architecture Overview
 
 ```
 ┌─────────────────┐         A2A/JSON-RPC          ┌──────────────────────┐
@@ -293,20 +726,26 @@ Get full details for a single item.
                                                    └──────────────────────┘
 ```
 
-### 7.1 Components
+### 14.1 Components
 
 | Component | Tech | Purpose |
 |---|---|---|
 | **A2A Server** | Python (FastAPI / Starlette) | Handles A2A protocol, routes skills |
 | **Search Index** | SQLite FTS5 → Meilisearch | Full-text + faceted product search |
-| **Ad Engine** | In-process module | Keyword bidding, insertion, attribution |
+| **Ad Engine** | In-process module | Keyword bidding, intent-tiered insertion, attribution |
+| **Agent Tracker** | In-process module | Visit logging, interest scoring, intent classification |
+| **Negotiation Engine** | In-process module | Offer/counter-offer, vendor floor pricing |
+| **Purchase Handler** | In-process module | Order creation, payment token validation |
+| **Federation Router** | In-process module | Peer discovery, cross-catalog fan-out |
+| **Embedding Index** | NumPy / FAISS (future) | Semantic vectors for items and queries |
+| **Vendor Analytics** | In-process module | Agent behavior analytics per vendor |
 | **Auth & Rate Limit** | API key + token bucket | Tiered access control |
 | **Vendor Portal** | Separate web app (future) | Product upload, ad campaign management |
 | **Data Store** | PostgreSQL | Canonical product + vendor + ad data |
 
 ---
 
-## 8. Security & Trust
+## 15. Security & Trust
 
 | Concern | Mitigation |
 |---|---|
@@ -315,10 +754,15 @@ Get full details for a single item.
 | Ad fraud (fake impressions) | Rate limiting, agent fingerprinting, anomaly detection |
 | Data poisoning by vendors | Review pipeline, flagging system |
 | Denial of service | Token bucket rate limiter, max response size |
+| Negotiation abuse | Max rounds, min offer floor, reputation gate |
+| Payment fraud | Tokenized payments, never store raw credentials |
+| Interest score gaming | Rate-limited event ingestion, anomaly detection on visit patterns |
+| Federation spoofing | Peer verification via Agent Card + mutual TLS |
+| Embedding extraction | Rate-limit embed requests, watermark vectors |
 
 ---
 
-## 9. Data Model (Core Entities)
+## 16. Data Model (Core Entities)
 
 ### Items
 | Field | Type | Notes |
@@ -356,29 +800,105 @@ Get full details for a single item.
 | keywords | [string...] |
 | categories | [string...] |
 | bid_cents | int |
+| bid_cents_browse | int |
+| bid_cents_consider | int |
+| bid_cents_high_intent | int |
+| bid_cents_ready_to_buy | int |
 | budget_cents | int |
 | spent_cents | int |
 | active | bool |
 | ad_tag | string |
 
+### Agent Profiles
+| Field | Type | Notes |
+|---|---|---|
+| agent_id | string | Derived from API key hash |
+| reputation | float | 0–100 trust score |
+| total_queries | int | Lifetime query count |
+| total_purchases | int | Completed purchases |
+| created_at | datetime | First seen |
+| last_seen_at | datetime | Most recent activity |
+
+### Agent Events (Visit Log)
+| Field | Type | Notes |
+|---|---|---|
+| id | string | Event ID |
+| agent_id | string | Who |
+| event_type | string | search, lookup, compare, negotiate, purchase |
+| item_id | string | null | Item referenced (if applicable) |
+| query | string | null | Search query (if applicable) |
+| category | string | null | Category context |
+| metadata | json | Additional event data |
+| timestamp | datetime | When |
+
+### Agent Interest Scores
+| Field | Type | Notes |
+|---|---|---|
+| agent_id | string | Compound key with item_id/category |
+| item_id | string | null | Per-item interest |
+| category | string | null | Per-category interest |
+| score | float | Computed interest score |
+| intent_tier | string | browse, consider, high_intent, ready_to_buy |
+| visit_count | int | Repeat visits to this item |
+| last_event_at | datetime | For recency decay |
+
+### Negotiation Sessions
+| Field | Type | Notes |
+|---|---|---|
+| session_id | string | Unique negotiation ID |
+| agent_id | string | Consumer agent |
+| item_id | string | Item being negotiated |
+| status | string | open, counter, accepted, rejected, expired |
+| agent_offer_cents | int | Latest agent offer |
+| vendor_floor_cents | int | Vendor's minimum (hidden from agent) |
+| current_price_cents | int | Current agreed/counter price |
+| rounds_used | int | Rounds consumed |
+| max_rounds | int | Cap (default 5) |
+| expires_at | datetime | Session expiry |
+| created_at | datetime | |
+
+### Orders
+| Field | Type | Notes |
+|---|---|---|
+| order_id | string | Unique order ID |
+| agent_id | string | Buyer agent |
+| item_id | string | Purchased item |
+| vendor_id | string | Seller vendor |
+| quantity | int | Units |
+| unit_price_cents | int | Final per-unit price |
+| total_cents | int | Total charge |
+| negotiate_session_id | string | null | If negotiated |
+| payment_status | string | pending, captured, failed |
+| shipping_method | string | null | |
+| status | string | confirmed, shipped, delivered, cancelled |
+| created_at | datetime | |
+
 ---
 
-## 10. Milestones
+## 17. Milestones
 
 | Phase | Deliverable | Target |
 |---|---|---|
 | **0 — Scaffold** | Repo, schemas, agent card, spec | Now |
 | **1 — MVP** | Search + Lookup over A2A, SQLite backend, no ads | +2 weeks |
-| **2 — Ads** | Ad engine, sponsored insertion, attribution tracking | +4 weeks |
-| **3 — Scale** | PostgreSQL, Meilisearch, rate limiting, vendor portal | +8 weeks |
-| **4 — Ecosystem** | Client SDK, agent integration guides, marketplace launch | +12 weeks |
+| **2 — Tracking** | Agent identity, visit tracking, interest scoring, intent tiers | +3 weeks |
+| **3 — Ads** | Ad engine, intent-tiered bidding, sponsored insertion | +5 weeks |
+| **4 — Negotiate** | Negotiation protocol, reputation system | +7 weeks |
+| **5 — Purchase** | Purchase completion, payment tokenization | +9 weeks |
+| **6 — Intelligence** | Semantic embeddings, vendor analytics | +11 weeks |
+| **7 — Federation** | Peer discovery, cross-catalog search, federation protocol | +14 weeks |
+| **8 — Scale** | PostgreSQL, Meilisearch, rate limiting, vendor portal | +16 weeks |
+| **9 — Ecosystem** | Client SDK, agent integration guides, marketplace launch | +20 weeks |
 
 ---
 
-## 11. Open Questions
+## 18. Open Questions
 
 - [ ] Should we support streaming (SSE) for large result sets or keep it simple request/response?
 - [ ] Multi-currency support — convert at query time or store per-vendor?
 - [ ] Review/rating system — accept ratings from consumer agents or vendor-submitted only?
 - [ ] How to handle product variants (size, color) in the compact format?
-- [ ] Federation — can multiple catalog servers interoperate?
+- [ ] Embedding model selection — which model for product embeddings? (candidate: all-MiniLM-L6-v2)
+- [ ] Federation trust — how to verify peer catalog integrity?
+- [ ] Negotiation AI — vendor-configurable negotiation strategies or marketplace-default?
+- [ ] Payment processor integration — Stripe, crypto, or pluggable?
