@@ -2,10 +2,11 @@
   "name": "A2A Sales Catalog",
   "description": "Agent marketplace for product and service discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, and cross-sell — all over A2A.",
   "url": "https://catalog.example.com",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "capabilities": {
     "streaming": false,
-    "pushNotifications": false
+    "pushNotifications": false,
+    "axonFormat": true
   },
   "skills": [
     {

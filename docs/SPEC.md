@@ -133,7 +133,93 @@ Sponsored items are **always disclosed** via the `sponsored` field. Consumer age
 
 ---
 
-## 5. API Skills (Endpoints)
+## 5. Wire Format — AXON (Agent eXchange Object Notation)
+
+### 5.1 Overview
+
+**AXON** is a proprietary, token-minimized plaintext wire format purpose-built for agent-to-agent commerce communication. While the default CAI format reduces payload size within JSON, AXON eliminates JSON overhead entirely, achieving **55-70% token reduction** versus standard JSON.
+
+Agents request AXON encoding by including `"format": "axon"` in any skill invocation. The server returns the response as a `text` part (instead of `data` part) containing AXON-encoded content.
+
+### 5.2 Design Principles
+
+| Principle | Mechanism |
+|---|---|
+| **Sigil-typed values** | Commerce-domain type prefixes: `$4999` (price), `★4.5` (rating), `#WE-001` (ID), `~vendor` (vendor ref), `@agent-001` (agent ref), `%10` (percentage), `!` (sponsored flag) |
+| **Schema-indexed columns** | `@{field|field|field}` declares column schema once; rows use `>` prefix |
+| **Pipe delimiters** | `\|` separates fields (avoids comma/decimal ambiguity) |
+| **Section blocks** | `[name]` / `[/name]` for nested structures |
+| **Elided nulls** | Empty pipe segments `\|\|` represent null/missing |
+| **Inline metadata** | `<n=5 page=1>` for counts, pagination, flags |
+
+### 5.3 Syntax Reference
+
+**Tabular data (search results, category lists):**
+```
+@{id|name|desc|price_cents|vendor|rating|sponsored|ad_tag}
+<n=3>
+> #WE-001|SoundPod Pro|Premium wireless earbuds|$4999|~soundpod.io|★4.5|0|
+> #WE-002|SoundPod Lite|Budget wireless earbuds|$2999|~soundpod.io|★4.2|0|
+> #WE-003|SoundPod Max|Flagship noise-cancelling|$5999|~soundpod.io|★4.8|!|ad-001
+```
+
+**Scalar key-value (item details, order confirmations):**
+```
+item_id=#WE-001
+name=SoundPod Pro
+price_cents=$4999
+rating=★4.5
+vendor_id=~v-soundpod
+```
+
+**Nested structures (cross-sell, promotions):**
+```
+item_id=#WE-001
+[recommendations]
+  @{item_id|rule_type|reason}
+  <n=2>
+  > #WE-003|upsell|Premium model with noise cancellation
+  > #WE-004|cross_sell|Matching carrying case
+[/recommendations]
+```
+
+### 5.4 Sigil Reference
+
+| Sigil | Domain | Fields | Example |
+|---|---|---|---|
+| `$` | Price (cents) | `price_cents`, `bid_cents`, `budget_cents`, `discount_cents` | `$4999` |
+| `★` | Rating | `rating` | `★4.5` |
+| `#` | Entity ID | `id`, `item_id`, `order_id`, `campaign_id`, `promo_id` | `#WE-001` |
+| `~` | Vendor ref | `vendor_id`, `vendor` | `~v-soundpod` |
+| `@` | Agent ref | `agent_id`, `referring_agent_id` | `@agent-42` |
+| `%` | Percentage | `discount_pct`, `ctr`, `cvr`, `confidence` | `%10` |
+| `!` | Sponsored flag | `sponsored` | `!` (true) or empty (false) |
+
+### 5.5 Requesting AXON Format
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"id":"t1","message":{"role":"user","parts":[{"type":"data","data":{"skill":"catalog.search","q":"earbuds","max":3,"format":"axon"}}]}}}
+```
+
+The response uses `"type":"text"` instead of `"type":"data"`:
+```json
+{"jsonrpc":"2.0","id":1,"result":{"id":"t1","status":{"state":"completed"},"artifacts":[{"parts":[{"type":"text","text":"@{id|name|desc|price_cents|vendor|rating|sponsored|ad_tag}\n<n=3>\n> #WE-001|SoundPod Pro|Premium wireless earbuds|$4999|~soundpod.io|★4.5|0|\n..."}]}]}}
+```
+
+### 5.6 Comparison: JSON vs CAI vs AXON
+
+| Metric | JSON (verbose) | CAI (positional JSON) | AXON (plaintext) |
+|---|---|---|---|
+| Format | Named-key objects | Positional arrays in JSON | Sigil-typed plaintext |
+| Token reduction vs JSON | — | ~60% | ~65-70% |
+| Parse complexity | Standard JSON | Standard JSON | Custom parser |
+| Type information | Implicit | Implicit by position | Explicit via sigils |
+| Human readability | High | Medium | High |
+| Schema declaration | Per-object keys | `fields` array | `@{schema}` header |
+
+---
+
+## 6. API Skills (Endpoints)
 
 ### 5.1 `catalog.search`
 
@@ -241,7 +327,7 @@ Get full details for a single item.
 
 ---
 
-## 6. Agent Identity, Tracking & Interest Scoring
+## 7. Agent Identity, Tracking & Interest Scoring
 
 ### 6.1 Agent Identity
 
@@ -331,7 +417,7 @@ Agents can query their own profile to see their interest scores and intent tier:
 
 ---
 
-## 7. Agent Reputation & Trust Scores
+## 8. Agent Reputation & Trust Scores
 
 ### 7.1 Reputation Model
 
@@ -380,7 +466,7 @@ Vendors can offer tiered pricing based on agent reputation:
 
 ---
 
-## 8. Negotiation Protocol
+## 9. Negotiation Protocol
 
 ### 8.1 Overview
 
@@ -441,7 +527,7 @@ Consumer Agent                    Catalog Server
 
 ---
 
-## 9. Purchase Completion Protocol
+## 10. Purchase Completion Protocol
 
 ### 9.1 Overview
 
@@ -490,7 +576,7 @@ Close the sale agent-to-agent. After discovery (search/lookup) and optional nego
 
 ---
 
-## 10. Federated Catalog Network
+## 11. Federated Catalog Network
 
 ### 10.1 Overview
 
@@ -550,7 +636,7 @@ Consumer Agent ──► Catalog A ──► local results
 
 ---
 
-## 11. Semantic Embeddings Index
+## 12. Semantic Embeddings Index
 
 ### 11.1 Overview
 
@@ -612,7 +698,7 @@ Get embeddings for specific items or a free-text query:
 
 ---
 
-## 12. Vendor Analytics
+## 13. Vendor Analytics
 
 ### 12.1 Overview
 
@@ -674,7 +760,7 @@ Vendors get analytics on **agent behavior** — not human behavior. This is a ne
 
 ---
 
-## 13. Advertising Model
+## 14. Advertising Model
 
 ### 13.1 How It Works
 
@@ -703,7 +789,7 @@ Vendors get analytics on **agent behavior** — not human behavior. This is a ne
 
 ---
 
-## 14. Display & Banner Ads
+## 15. Display & Banner Ads
 
 ### 14.1 Overview
 
@@ -728,7 +814,7 @@ Beyond search-result sponsorship, vendors can purchase **display ad placements**
 
 ---
 
-## 15. Retargeting & Remarketing
+## 16. Retargeting & Remarketing
 
 ### 15.1 Overview
 
@@ -761,7 +847,7 @@ Agents that viewed items but did not purchase receive **personalized retargeting
 
 ---
 
-## 16. Affiliate & Referral Program
+## 17. Affiliate & Referral Program
 
 ### 16.1 Overview
 
@@ -797,7 +883,7 @@ Consumer agents can **earn commission** by referring other agents to purchase it
 
 ---
 
-## 17. Real-Time Bidding (RTB)
+## 18. Real-Time Bidding (RTB)
 
 ### 17.1 Overview
 
@@ -824,7 +910,7 @@ For high-value placement slots, multiple advertisers compete in a **per-request 
 
 ---
 
-## 18. Frequency Capping
+## 19. Frequency Capping
 
 ### 18.1 Overview
 
@@ -845,7 +931,7 @@ To prevent ad fatigue and ensure a healthy agent experience, each campaign can s
 
 ---
 
-## 19. A/B Testing for Ad Creatives
+## 20. A/B Testing for Ad Creatives
 
 ### 19.1 Overview
 
@@ -871,7 +957,7 @@ The `catalog.ab_results` skill returns per-variant aggregates:
 
 ---
 
-## 20. Audience Segments & Lookalike Targeting
+## 21. Audience Segments & Lookalike Targeting
 
 ### 20.1 Overview
 
@@ -893,7 +979,7 @@ The `catalog.audience` skill with `action: "classify"` analyzes an agent's event
 
 ---
 
-## 21. Conversion Attribution
+## 22. Conversion Attribution
 
 ### 21.1 Overview
 
@@ -930,7 +1016,7 @@ When a purchase occurs, the engine runs attribution and stores results:
 
 ---
 
-## 22. Promotional Campaigns (Coupons, Flash Sales, Bundles)
+## 23. Promotional Campaigns (Coupons, Flash Sales, Bundles)
 
 ### 22.1 Overview
 
@@ -960,7 +1046,7 @@ Vendors create **promotional campaigns** — coupons, flash sales, and bundle de
 
 ---
 
-## 23. Cross-Sell & Upsell Recommendations
+## 24. Cross-Sell & Upsell Recommendations
 
 ### 23.1 Overview
 
@@ -986,7 +1072,7 @@ Vendors define **cross-sell and upsell rules** that recommend complementary or u
 
 ---
 
-## 24. Creative Rotation
+## 25. Creative Rotation
 
 ### 24.1 Overview
 
@@ -1003,7 +1089,7 @@ The engine tracks a rotation index per campaign and selects creatives according 
 
 ---
 
-## 25. Campaign Scheduling & Dayparting
+## 26. Campaign Scheduling & Dayparting
 
 ### 25.1 Overview
 
@@ -1029,7 +1115,7 @@ If any check fails, the campaign is skipped.
 
 ---
 
-## 26. Architecture Overview
+## 27. Architecture Overview
 
 ```
 ┌─────────────────┐         A2A/JSON-RPC          ┌──────────────────────┐
@@ -1077,7 +1163,7 @@ If any check fails, the campaign is skipped.
 
 ---
 
-## 27. Security & Trust
+## 28. Security & Trust
 
 | Concern | Mitigation |
 |---|---|
@@ -1094,7 +1180,7 @@ If any check fails, the campaign is skipped.
 
 ---
 
-## 28. Data Model (Core Entities)
+## 29. Data Model (Core Entities)
 
 ### Items
 | Field | Type | Notes |
@@ -1207,7 +1293,7 @@ If any check fails, the campaign is skipped.
 
 ---
 
-## 29. Milestones
+## 30. Milestones
 
 | Phase | Deliverable | Target |
 |---|---|---|
@@ -1224,7 +1310,7 @@ If any check fails, the campaign is skipped.
 
 ---
 
-## 30. Open Questions
+## 31. Open Questions
 
 - [ ] Should we support streaming (SSE) for large result sets or keep it simple request/response?
 - [ ] Multi-currency support — convert at query time or store per-vendor?

@@ -18,9 +18,11 @@ from urllib.error import HTTPError, URLError
 class CatalogClient:
     """Minimal A2A client for the Sales Catalog server."""
 
-    def __init__(self, base_url: str, api_key: str | None = None) -> None:
+    def __init__(self, base_url: str, api_key: str | None = None,
+                 *, use_axon: bool = False) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        self.use_axon = use_axon
 
     # ------------------------------------------------------------------
     # Public SDK methods
@@ -238,8 +240,10 @@ class CatalogClient:
     # Transport
     # ------------------------------------------------------------------
 
-    def _send_task(self, skill_data: dict[str, Any]) -> dict[str, Any]:
+    def _send_task(self, skill_data: dict[str, Any]) -> dict[str, Any] | str:
         """Send a tasks/send JSON-RPC request."""
+        if self.use_axon:
+            skill_data = {**skill_data, "format": "axon"}
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -262,7 +266,11 @@ class CatalogClient:
         if artifacts:
             parts = artifacts[0].get("parts", [])
             if parts:
-                return parts[0].get("data", {})
+                part = parts[0]
+                # AXON responses come as text parts
+                if part.get("type") == "text":
+                    return part.get("text", "")
+                return part.get("data", {})
         return {}
 
     def _post(self, path: str, body: dict) -> dict[str, Any]:

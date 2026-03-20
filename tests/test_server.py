@@ -510,4 +510,155 @@ def test_agent_card_has_20_skills(client):
     resp = client.get("/.well-known/agent.json")
     card = resp.json()
     assert len(card["skills"]) == 20
-    assert card["version"] == "0.3.0"
+    assert card["version"] == "0.4.0"
+
+
+# -----------------------------------------------------------------------
+# AXON format tests
+# -----------------------------------------------------------------------
+
+def _send_axon(client, skill_data, task_id="t1"):
+    """Send a request with format=axon, return raw AXON text."""
+    skill_data = {**skill_data, "format": "axon"}
+    payload = {
+        "jsonrpc": "2.0", "id": 1, "method": "tasks/send",
+        "params": {
+            "id": task_id,
+            "message": {"role": "user", "parts": [
+                {"type": "data", "data": skill_data}
+            ]},
+        },
+    }
+    resp = client.post("/a2a", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    result = body["result"]
+    assert result["status"]["state"] == "completed"
+    part = result["artifacts"][0]["parts"][0]
+    assert part["type"] == "text"
+    return part["text"]
+
+
+def test_axon_search(client):
+    """Search with AXON format should return text, not JSON data."""
+    text = _send_axon(client, {"skill": "catalog.search", "q": "earbuds", "max": 3})
+    assert isinstance(text, str)
+    # Should contain schema header
+    assert "@{" in text
+    # Should contain row markers
+    assert "> " in text
+    # Should contain pipe delimiters
+    assert "|" in text
+    # Should NOT be JSON
+    assert not text.strip().startswith("{")
+
+
+def test_axon_search_has_sigils(client):
+    """AXON output should use sigil-typed values for commerce fields."""
+    text = _send_axon(client, {"skill": "catalog.search", "q": "earbuds", "max": 3})
+    # Price sigil $ should appear in rows
+    assert "$" in text
+    # Rating sigil ★ should appear
+    assert "\u2605" in text
+
+
+def test_axon_lookup(client):
+    """Lookup with AXON format should return key=value pairs."""
+    text = _send_axon(client, {"skill": "catalog.lookup", "id": "WE-001"})
+    assert isinstance(text, str)
+    assert "name=" in text
+    assert "SoundPod Pro" in text
+
+
+def test_axon_categories(client):
+    """Categories with AXON format should return tabular data."""
+    text = _send_axon(client, {"skill": "catalog.categories"})
+    assert "@{" in text
+    assert "> " in text
+
+
+def test_axon_promotions(client):
+    """Promotions with AXON format should return structured data."""
+    text = _send_axon(client, {"skill": "catalog.promotions", "action": "discover"})
+    assert isinstance(text, str)
+    assert "count=" in text or "promotions" in text.lower() or ">" in text
+
+
+def test_axon_roundtrip():
+    """Encode a dict to AXON and decode it back — should preserve structure."""
+    from src.common.axon import encode, decode
+
+    original = {
+        "fields": ["id", "name", "price_cents", "rating"],
+        "items": [
+            ["WE-001", "SoundPod Pro", 4999, 4.5],
+            ["WE-002", "SoundPod Lite", 2999, 4.2],
+        ],
+    }
+    axon_text = encode(original)
+    decoded = decode(axon_text)
+
+    assert decoded["fields"] == original["fields"]
+    assert len(decoded["items"]) == 2
+    # Values should round-trip (sigils stripped, types coerced)
+    assert decoded["items"][0][0] == "WE-001"
+    assert decoded["items"][0][2] == 4999
+    assert decoded["items"][0][3] == 4.5
+
+
+def test_axon_scalar_dict_roundtrip():
+    """Encode a flat key-value dict and decode it back."""
+    from src.common.axon import encode, decode
+
+    original = {
+        "order_id": "ORD-001",
+        "status": "confirmed",
+        "price_cents": 4999,
+        "agent_id": "agent-42",
+    }
+    axon_text = encode(original)
+    decoded = decode(axon_text)
+
+    assert decoded["status"] == "confirmed"
+    assert decoded["price_cents"] == 4999
+
+
+def test_axon_nested_section():
+    """Encode nested dicts using [section] blocks."""
+    from src.common.axon import encode, decode
+
+    original = {
+        "item_id": "WE-001",
+        "recommendations": [
+            {"item_id": "WE-003", "rule_type": "upsell", "reason": "Premium model"},
+        ],
+    }
+    axon_text = encode(original)
+    assert "[recommendations]" in axon_text
+    assert "[/recommendations]" in axon_text
+
+
+def test_axon_token_savings():
+    """AXON should produce fewer tokens than JSON for the same data."""
+    import json as json_mod
+    from src.common.axon import encode, token_estimate
+
+    data = {
+        "fields": ["id", "name", "desc", "price_cents", "vendor", "rating", "sponsored", "ad_tag"],
+        "items": [
+            ["WE-001", "SoundPod Pro", "Premium wireless earbuds", 4999, "soundpod.io", 4.5, 0, None],
+            ["WE-002", "SoundPod Lite", "Budget wireless earbuds", 2999, "soundpod.io", 4.2, 0, None],
+            ["WE-003", "SoundPod Max", "Flagship noise-cancelling", 5999, "soundpod.io", 4.8, 1, "ad-001"],
+        ],
+    }
+    json_text = json_mod.dumps(data)
+    axon_text = encode(data)
+
+    json_tokens = token_estimate(json_text)
+    axon_tokens = token_estimate(axon_text)
+
+    # AXON should use fewer tokens than JSON
+    assert axon_tokens < json_tokens
+    # Should achieve at least 30% reduction
+    reduction = 1 - (axon_tokens / json_tokens)
+    assert reduction >= 0.3, f"Only {reduction:.0%} reduction, expected >= 30%"

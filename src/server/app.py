@@ -180,6 +180,9 @@ def _handle_task_send(rpc_id: Any, params: dict, agent_id: str = "") -> JSONResp
             "error": {"code": -32602, "message": "Missing skill data in message parts"},
         })
 
+    # Check if client requested AXON format
+    use_axon = str(skill_data.pop("format", "")).lower() == "axon"
+
     assert router is not None
     result_data = router.handle(skill_data, agent_id=agent_id)
 
@@ -190,6 +193,20 @@ def _handle_task_send(rpc_id: Any, params: dict, agent_id: str = "") -> JSONResp
             "result": {
                 "id": task_id,
                 "status": {"state": "failed", "message": result_data["error"]},
+            },
+        })
+
+    # AXON encoding: return as text part instead of data part
+    if use_axon:
+        from src.common.axon import encode_response
+        axon_text = encode_response(result_data)
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {
+                "id": task_id,
+                "status": {"state": "completed"},
+                "artifacts": [{"parts": [{"type": "text", "text": axon_text}]}],
             },
         })
 
