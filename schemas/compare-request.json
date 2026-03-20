@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CatalogCompareRequest",
+  "description": "Input schema for catalog.compare skill",
+  "type": "object",
+  "required": ["skill", "ids"],
+  "properties": {
+    "skill": { "const": "catalog.compare" },
+    "ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "minItems": 2,
+      "maxItems": 10,
+      "description": "Item IDs to compare"
+    }
+  },
+  "additionalProperties": false
+}

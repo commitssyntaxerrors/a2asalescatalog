@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CatalogLookupRequest",
+  "description": "Input schema for catalog.lookup skill",
+  "type": "object",
+  "required": ["skill", "id"],
+  "properties": {
+    "skill": { "const": "catalog.lookup" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Catalog item ID" }
+  },
+  "additionalProperties": false
+}

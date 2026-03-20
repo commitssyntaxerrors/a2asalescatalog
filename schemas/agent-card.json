@@ -1,0 +1,56 @@
+{
+  "name": "A2A Sales Catalog",
+  "description": "Agent marketplace for product and service discovery. Query products, compare items, browse categories — all over A2A with compact tuple responses.",
+  "url": "https://catalog.example.com",
+  "version": "0.1.0",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "skills": [
+    {
+      "id": "catalog.search",
+      "name": "Search Catalog",
+      "description": "Search for products or services by query, with optional category, price, and vendor filters. Returns compact tuple arrays.",
+      "examples": [
+        "Find wireless earbuds under $50",
+        "Search for standing desks sorted by rating"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.lookup",
+      "name": "Lookup Item",
+      "description": "Get full details for a specific catalog item by its ID.",
+      "examples": [
+        "Get details for item WE-001"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.categories",
+      "name": "Browse Categories",
+      "description": "List available product/service categories, optionally scoped to a parent category.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.compare",
+      "name": "Compare Items",
+      "description": "Compare two or more catalog items side by side. Returns a table of fields and rows.",
+      "examples": [
+        "Compare WE-001, WE-002, and WE-003"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    }
+  ],
+  "defaultInputModes": ["application/json"],
+  "defaultOutputModes": ["application/json"],
+  "authentication": {
+    "schemes": ["apiKey"],
+    "credentials": null
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CatalogCategoriesRequest",
+  "description": "Input schema for catalog.categories skill",
+  "type": "object",
+  "required": ["skill"],
+  "properties": {
+    "skill": { "const": "catalog.categories" },
+    "parent": { "type": ["string", "null"], "description": "Parent category ID, or null for top-level" }
+  },
+  "additionalProperties": false
+}

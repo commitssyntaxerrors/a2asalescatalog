@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CatalogSearchResponse",
+  "description": "Compact tuple response for catalog.search skill",
+  "type": "object",
+  "required": ["items", "fields", "currency"],
+  "properties": {
+    "fields": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ordered field names — each item tuple follows this order"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "description": "Positional tuple matching fields order"
+      },
+      "description": "Array of item tuples"
+    },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "total": { "type": "integer", "minimum": 0, "description": "Total matching items (may exceed returned count)" }
+  },
+  "additionalProperties": false
+}
