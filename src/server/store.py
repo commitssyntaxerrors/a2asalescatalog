@@ -17,6 +17,7 @@ from src.common.models import (
     AgentSegment, AgentSegmentMembership, CatalogItem, Category,
     ConversionAttribution, CrossSellRule, FrequencyRecord,
     NegotiationSession, Order, Promotion, TouchPoint, Vendor,
+    VideoCategory, VideoChannel, VideoItem, VideoPlaylist,
     classify_intent,
 )
 
@@ -264,6 +265,67 @@ class CatalogStore:
                 bid_cents INTEGER DEFAULT 0,
                 priority INTEGER DEFAULT 0,
                 PRIMARY KEY (source_item_id, target_item_id)
+            );
+
+            -- Video catalog tables
+            CREATE TABLE IF NOT EXISTS video_channels (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                subscriber_count INTEGER DEFAULT 0,
+                video_count INTEGER DEFAULT 0,
+                description TEXT DEFAULT '',
+                avatar_url TEXT DEFAULT '',
+                verified INTEGER DEFAULT 0,
+                created_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS video_categories (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                parent_id TEXT,
+                video_count INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS videos (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                channel_id TEXT NOT NULL REFERENCES video_channels(id),
+                platform TEXT NOT NULL,
+                category_id TEXT NOT NULL REFERENCES video_categories(id),
+                duration_secs INTEGER DEFAULT 0,
+                views INTEGER DEFAULT 0,
+                likes INTEGER DEFAULT 0,
+                rating REAL DEFAULT 0.0,
+                publish_ts REAL DEFAULT 0,
+                thumbnail_url TEXT DEFAULT '',
+                video_url TEXT DEFAULT '',
+                transcript_summary TEXT DEFAULT '',
+                tags TEXT DEFAULT '[]',
+                chapters TEXT DEFAULT '[]',
+                resolution TEXT DEFAULT '',
+                language TEXT DEFAULT 'en',
+                sponsored INTEGER DEFAULT 0,
+                ad_tag TEXT,
+                active INTEGER DEFAULT 1,
+                embedding TEXT DEFAULT '',
+                created_at REAL
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS videos_fts USING fts5(
+                id, title, description, transcript_summary,
+                content=videos, content_rowid=rowid
+            );
+
+            CREATE TABLE IF NOT EXISTS video_playlists (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                channel_id TEXT DEFAULT '',
+                video_ids TEXT DEFAULT '[]',
+                auto_generated INTEGER DEFAULT 0,
+                created_at REAL
             );
         """)
         c.commit()
@@ -912,6 +974,189 @@ class CatalogStore:
                ORDER BY cs.priority DESC, cs.bid_cents DESC""",
             (item_id,),
         ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Video catalog
+    # ------------------------------------------------------------------
+
+    def upsert_video_channel(self, ch: VideoChannel) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO video_channels
+               (id, name, platform, subscriber_count, video_count,
+                description, avatar_url, verified, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (ch.id, ch.name, ch.platform, ch.subscriber_count, ch.video_count,
+             ch.description, ch.avatar_url, int(ch.verified), ch.created_at),
+        )
+        self._conn.commit()
+
+    def upsert_video_category(self, cat: VideoCategory) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO video_categories (id, label, parent_id, video_count) "
+            "VALUES (?,?,?,?)",
+            (cat.id, cat.label, cat.parent_id, cat.video_count),
+        )
+        self._conn.commit()
+
+    def upsert_video(self, v: VideoItem) -> None:
+        import json
+        self._conn.execute(
+            """INSERT OR REPLACE INTO videos
+               (id, title, description, channel_id, platform, category_id,
+                duration_secs, views, likes, rating, publish_ts, thumbnail_url,
+                video_url, transcript_summary, tags, chapters, resolution,
+                language, sponsored, ad_tag, active, embedding, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (v.id, v.title, v.description, v.channel_id, v.platform,
+             v.category_id, v.duration_secs, v.views, v.likes, v.rating,
+             v.publish_ts, v.thumbnail_url, v.video_url, v.transcript_summary,
+             json.dumps(v.tags), json.dumps(v.chapters), v.resolution,
+             v.language, v.sponsored, v.ad_tag, int(v.active), v.embedding,
+             v.created_at),
+        )
+        # Update FTS
+        self._conn.execute(
+            "INSERT OR REPLACE INTO videos_fts (rowid, id, title, description, transcript_summary) "
+            "SELECT rowid, id, title, description, transcript_summary FROM videos WHERE id = ?",
+            (v.id,),
+        )
+        self._conn.commit()
+
+    def upsert_video_playlist(self, pl: VideoPlaylist) -> None:
+        import json
+        self._conn.execute(
+            """INSERT OR REPLACE INTO video_playlists
+               (id, title, description, channel_id, video_ids, auto_generated, created_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (pl.id, pl.title, pl.description, pl.channel_id,
+             json.dumps(pl.video_ids), int(pl.auto_generated), pl.created_at),
+        )
+        self._conn.commit()
+
+    def search_videos(
+        self,
+        query: str,
+        *,
+        category: str | None = None,
+        platform: str | None = None,
+        channel_id: str | None = None,
+        duration_min: int | None = None,
+        duration_max: int | None = None,
+        sort: str = "relevance",
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        conditions = ["v.active = 1"]
+        params: list[Any] = []
+        if category:
+            conditions.append("v.category_id = ?")
+            params.append(category)
+        if platform:
+            conditions.append("v.platform = ?")
+            params.append(platform)
+        if channel_id:
+            conditions.append("v.channel_id = ?")
+            params.append(channel_id)
+        if duration_min is not None:
+            conditions.append("v.duration_secs >= ?")
+            params.append(duration_min)
+        if duration_max is not None:
+            conditions.append("v.duration_secs <= ?")
+            params.append(duration_max)
+
+        where = " AND ".join(conditions)
+        if query.strip():
+            fts_clause = "v.rowid IN (SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?)"
+            where = f"{where} AND {fts_clause}"
+            params.append(query)
+
+        order = {
+            "views": "v.views DESC",
+            "rating": "v.rating DESC",
+            "newest": "v.publish_ts DESC",
+            "duration_asc": "v.duration_secs ASC",
+            "duration_desc": "v.duration_secs DESC",
+        }.get(sort, "v.sponsored DESC, v.views DESC")
+
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT v.*, c.name as channel_name FROM videos v "
+            f"JOIN video_channels c ON v.channel_id = c.id "
+            f"WHERE {where} ORDER BY {order} LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def lookup_video(self, video_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT v.*, c.name as channel_name FROM videos v "
+            "JOIN video_channels c ON v.channel_id = c.id WHERE v.id = ?",
+            (video_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_video_categories(self, parent_id: str | None = None) -> list[dict[str, Any]]:
+        if parent_id is None:
+            rows = self._conn.execute(
+                "SELECT * FROM video_categories WHERE parent_id IS NULL ORDER BY label"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM video_categories WHERE parent_id = ? ORDER BY label",
+                (parent_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_channel(self, channel_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM video_channels WHERE id = ?", (channel_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_channel_videos(self, channel_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT v.*, c.name as channel_name FROM videos v "
+            "JOIN video_channels c ON v.channel_id = c.id "
+            "WHERE v.channel_id = ? AND v.active = 1 ORDER BY v.publish_ts DESC LIMIT ?",
+            (channel_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_trending_videos(self, *, category: str | None = None,
+                            limit: int = 10) -> list[dict[str, Any]]:
+        conditions = ["v.active = 1"]
+        params: list[Any] = []
+        if category:
+            conditions.append("v.category_id = ?")
+            params.append(category)
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT v.*, c.name as channel_name FROM videos v "
+            f"JOIN video_channels c ON v.channel_id = c.id "
+            f"WHERE {where} ORDER BY v.views DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_video_playlist(self, playlist_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM video_playlists WHERE id = ?", (playlist_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_video_playlists(self, *, channel_id: str | None = None,
+                             limit: int = 20) -> list[dict[str, Any]]:
+        if channel_id:
+            rows = self._conn.execute(
+                "SELECT * FROM video_playlists WHERE channel_id = ? ORDER BY created_at DESC LIMIT ?",
+                (channel_id, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM video_playlists ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------

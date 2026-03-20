@@ -1,6 +1,6 @@
 # A2A Sales Catalog — Specification Sheet
 
-**Version:** 0.3.0-draft
+**Version:** 0.5.0-draft
 **Date:** 2026-03-19
 **Status:** Draft
 
@@ -1157,6 +1157,7 @@ If any check fails, the campaign is skipped.
 | **Promotion Engine** | In-process module | Coupons, flash sales, bundle deals, promo code validation |
 | **Audience Engine** | In-process module | Behavioral segment classification and lookalike targeting |
 | **Attribution Engine** | In-process module | Multi-touch conversion attribution (first/last touch) |
+| **Video Content Engine** | In-process module | Cross-platform video discovery, transcript search, creator profiles, playlists, trending, recommendations |
 | **Auth & Rate Limit** | API key + token bucket | Tiered access control |
 | **Vendor Portal** | Separate web app (future) | Product upload, ad campaign management |
 | **Data Store** | PostgreSQL | Canonical product + vendor + ad data |
@@ -1291,9 +1292,144 @@ If any check fails, the campaign is skipped.
 | status | string | confirmed, shipped, delivered, cancelled |
 | created_at | datetime | |
 
+### Videos
+| Field | Type | Notes |
+|---|---|---|
+| id | string | Prefixed by VID- (e.g., "VID-001") |
+| title | string | Video title |
+| description | string | Video description |
+| channel_id | string | Foreign key to video channel |
+| platform | string | youtube, vimeo, tiktok, educational |
+| category_id | string | Foreign key to video category |
+| duration_secs | int | Video length in seconds |
+| views | int | Total view count |
+| likes | int | Total like count |
+| rating | float | 0.0–5.0 aggregate |
+| publish_ts | float | Unix timestamp of publish date |
+| thumbnail_url | string | Thumbnail image URL |
+| video_url | string | Direct video URL |
+| transcript_summary | string | AI-generated transcript summary |
+| tags | [string...] | Content tags |
+| chapters | [[ts,title]...] | Timestamp-indexed chapters |
+| resolution | string | 4K, 1080p, 720p |
+| language | string | ISO 639-1 (default "en") |
+| sponsored | int | 0 or 1 |
+| ad_tag | string | null | Advertiser campaign tag |
+
+### Video Channels
+| Field | Type | Notes |
+|---|---|---|
+| id | string | Unique channel ID (e.g., "ch-techrev") |
+| name | string | Channel display name |
+| platform | string | Primary platform |
+| subscriber_count | int | Total subscribers |
+| video_count | int | Total published videos |
+| description | string | Channel description |
+| verified | bool | Platform-verified creator |
+
+### Video Categories
+| Field | Type |
+|---|---|
+| id | string |
+| label | string |
+| parent_id | string | null |
+| video_count | int |
+
+### Video Playlists
+| Field | Type | Notes |
+|---|---|---|
+| id | string | Unique playlist ID |
+| title | string | Playlist title |
+| description | string | Playlist description |
+| channel_id | string | Creator channel |
+| video_ids | [string...] | Ordered video IDs |
+| auto_generated | bool | System-generated vs curated |
+
 ---
 
-## 30. Milestones
+## 30. Video Content Catalog
+
+### 30.1 Overview
+
+The **Video Content Catalog** extends the A2A Sales Catalog with a dedicated namespace (`video.*`) for video content discovery across platforms. Consumer agents can search, browse, and get recommendations for video content to present to their users — all through a single A2A endpoint.
+
+This is the first **agent-native video discovery protocol** — agents don't need to integrate with YouTube API, Vimeo API, or any platform-specific SDK. One interface, structured compact responses, cross-platform search.
+
+### 30.2 Skill Reference
+
+| Skill | Purpose | Key Params |
+|---|---|---|
+| `video.search` | Search videos by query with filters | `q`, `cat`, `platform`, `channel_id`, `duration_min/max`, `sort`, `max` |
+| `video.lookup` | Full details for a specific video | `id` |
+| `video.trending` | Popular videos by views | `cat`, `max` |
+| `video.creator` | Channel profile + recent uploads | `channel_id`, `recent_max` |
+| `video.categories` | Browse video categories | `parent` |
+| `video.playlist` | Get playlist details or list playlists | `id`, `channel_id`, `max` |
+| `video.transcript` | Search video transcript summaries | `q`, `cat`, `platform`, `max` |
+| `video.recommend` | Content recommendations | `video_id`, `cat`, `max` |
+
+### 30.3 Wire Format
+
+Video search results use compact positional tuples, same as catalog items:
+
+```
+fields: ["id", "title", "channel", "platform", "duration_secs", "views", "rating", "sponsored", "ad_tag"]
+items: [
+  ["VID-001", "Best Wireless Earbuds 2026", "TechReviewer", "youtube", 1245, 1850000, 4.8, 0, null],
+  ["VID-002", "Building AI Agents with Python", "CodeSchool", "youtube", 3600, 720000, 4.9, 0, null]
+]
+```
+
+**AXON format:**
+```
+@{id|title|channel|platform|duration_secs|views|rating|sponsored|ad_tag}
+<n=2>
+> #VID-001|Best Wireless Earbuds 2026|~TechReviewer|youtube|1245|1850000|★4.8|0|
+> #VID-002|Building AI Agents with Python|~CodeSchool|youtube|3600|720000|★4.9|0|
+```
+
+### 30.4 Video Lookup Response
+
+Full video details include transcript summary and chapter markers:
+
+```json
+{
+  "id": "VID-001",
+  "title": "Best Wireless Earbuds 2026 — Top 5 Picks",
+  "channel": "TechReviewer",
+  "platform": "youtube",
+  "duration_secs": 1245,
+  "views": 1850000,
+  "rating": 4.8,
+  "transcript_summary": "Comparison of 5 wireless earbuds...",
+  "chapters": [["0:00", "Intro"], ["2:15", "Sound Quality"], ["8:30", "ANC Test"]],
+  "tags": ["earbuds", "wireless", "review"]
+}
+```
+
+### 30.5 Transcript Search
+
+Agents can search video content by what was *said* in the video, not just titles and tags. The `video.transcript` skill matches against AI-generated transcript summaries stored with each video.
+
+### 30.6 Creator Profiles
+
+The `video.creator` skill returns structured channel data including subscriber count, video count, verified status, and recent uploads in compact tuple format.
+
+### 30.7 Playlists
+
+Curated and auto-generated playlists group related videos. Agents can fetch a specific playlist's full content or browse available playlists by channel.
+
+### 30.8 Recommendations
+
+The `video.recommend` skill returns content recommendations based on:
+- **Video-based**: Similar videos from the same category/creator as a given video
+- **Category-based**: Popular content in a specified category
+
+The source video is always excluded from recommendations.
+
+---
+
+## 31. Milestones
 
 | Phase | Deliverable | Target |
 |---|---|---|
@@ -1310,7 +1446,7 @@ If any check fails, the campaign is skipped.
 
 ---
 
-## 31. Open Questions
+## 32. Open Questions
 
 - [ ] Should we support streaming (SSE) for large result sets or keep it simple request/response?
 - [ ] Multi-currency support — convert at query time or store per-vendor?

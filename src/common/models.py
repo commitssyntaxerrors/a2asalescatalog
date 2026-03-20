@@ -324,6 +324,103 @@ def classify_intent(score: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Video domain models
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class VideoItem:
+    """A video content listing (YouTube, Vimeo, educational platforms, etc.)."""
+    id: str
+    title: str
+    description: str
+    channel_id: str
+    platform: str  # youtube, vimeo, tiktok, educational
+    category_id: str
+    duration_secs: int = 0
+    views: int = 0
+    likes: int = 0
+    rating: float = 0.0
+    publish_ts: float = 0.0
+    thumbnail_url: str = ""
+    video_url: str = ""
+    transcript_summary: str = ""
+    tags: list[str] = field(default_factory=list)
+    chapters: list[list[str]] = field(default_factory=list)  # [[ts, title], ...]
+    resolution: str = ""  # 4K, 1080p, 720p
+    language: str = "en"
+    sponsored: int = 0
+    ad_tag: str | None = None
+    active: bool = True
+    embedding: str = ""
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class VideoChannel:
+    """A content creator / channel."""
+    id: str
+    name: str
+    platform: str
+    subscriber_count: int = 0
+    video_count: int = 0
+    description: str = ""
+    avatar_url: str = ""
+    verified: bool = False
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class VideoCategory:
+    id: str
+    label: str
+    parent_id: str | None = None
+    video_count: int = 0
+
+
+@dataclass(slots=True)
+class VideoPlaylist:
+    """A curated or auto-generated playlist."""
+    id: str
+    title: str
+    description: str = ""
+    channel_id: str = ""
+    video_ids: list[str] = field(default_factory=list)
+    auto_generated: bool = False
+    created_at: float = field(default_factory=time.time)
+
+
+# ---------------------------------------------------------------------------
+# Video compact encoding helpers
+# ---------------------------------------------------------------------------
+
+VIDEO_SEARCH_FIELDS = [
+    "id", "title", "channel", "platform", "duration_secs",
+    "views", "rating", "sponsored", "ad_tag",
+]
+VIDEO_CATEGORY_FIELDS = ["id", "label", "video_count"]
+VIDEO_CHANNEL_FIELDS = ["id", "name", "platform", "subscribers", "videos", "verified"]
+
+
+def video_to_tuple(v: VideoItem, channel_name: str = "") -> list[Any]:
+    """Encode a VideoItem as a positional tuple matching VIDEO_SEARCH_FIELDS."""
+    return [
+        v.id,
+        v.title,
+        channel_name or v.channel_id,
+        v.platform,
+        v.duration_secs,
+        v.views,
+        v.rating,
+        v.sponsored,
+        v.ad_tag,
+    ]
+
+
+def video_category_to_tuple(cat: VideoCategory) -> list[Any]:
+    return [cat.id, cat.label, cat.video_count]
+
+
+# ---------------------------------------------------------------------------
 # Compact encoding helpers
 # ---------------------------------------------------------------------------
 

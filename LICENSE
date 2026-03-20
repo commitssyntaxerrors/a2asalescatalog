@@ -98,6 +98,15 @@ Advertising & Monetization:
 - Campaign scheduling and dayparting for agent-targeted advertising
   with date range, hour-of-day, and day-of-week constraints
 
+Video Content Catalog:
+- Cross-platform video content discovery protocol for AI agents
+  (single interface for YouTube, Vimeo, TikTok, educational platforms)
+- Transcript-based semantic video search for AI agent consumers
+- Creator/channel profile aggregation with verified status for agents
+- Agent-native video playlist curation and discovery
+- Video recommendation engine for AI agents based on content similarity
+- Trending video aggregation across platforms for agent audiences
+
 First published: March 19, 2026 (v0.1.0).
 Revised: March 19, 2026 (v0.2.0) — added agent tracking, reputation,
   negotiation, purchase, federation, embeddings, vendor analytics,
@@ -109,6 +118,9 @@ Revised: March 19, 2026 (v0.3.0) — added display ads, retargeting,
 Revised: March 19, 2026 (v0.4.0) — added AXON (Agent eXchange Object
   Notation) proprietary wire format with sigil-typed values, schema-indexed
   columns, pipe delimiters, and section blocks.
+Revised: March 19, 2026 (v0.5.0) — added video content catalog with
+  cross-platform video discovery, transcript-based search, creator profiles,
+  playlists, trending aggregation, and content recommendations for AI agents.
 
 CONTACT
 -------

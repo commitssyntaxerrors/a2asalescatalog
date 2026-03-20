@@ -506,11 +506,11 @@ def test_purchase_with_promo(client):
 # Agent Card updated skill count
 # -----------------------------------------------------------------------
 
-def test_agent_card_has_20_skills(client):
+def test_agent_card_has_28_skills(client):
     resp = client.get("/.well-known/agent.json")
     card = resp.json()
-    assert len(card["skills"]) == 20
-    assert card["version"] == "0.4.0"
+    assert len(card["skills"]) == 28
+    assert card["version"] == "0.5.0"
 
 
 # -----------------------------------------------------------------------
@@ -662,3 +662,148 @@ def test_axon_token_savings():
     # Should achieve at least 30% reduction
     reduction = 1 - (axon_tokens / json_tokens)
     assert reduction >= 0.3, f"Only {reduction:.0%} reduction, expected >= 30%"
+
+
+# -----------------------------------------------------------------------
+# Video catalog tests
+# -----------------------------------------------------------------------
+
+
+def test_video_search(client):
+    """video.search returns compact tuples for video results."""
+    data = _send(client, {"skill": "video.search", "q": "earbuds"})
+    assert "fields" in data
+    assert "items" in data
+    assert data["total"] >= 1
+    assert "id" in data["fields"]
+    assert "title" in data["fields"]
+    # First result should match earbuds
+    first = data["items"][0]
+    assert "VID-" in first[0]
+
+
+def test_video_search_by_platform(client):
+    """video.search filters by platform."""
+    data = _send(client, {"skill": "video.search", "q": "", "platform": "vimeo"})
+    assert data["total"] >= 1
+    for item in data["items"]:
+        assert item[3] == "vimeo"  # platform field
+
+
+def test_video_search_by_category(client):
+    """video.search filters by category."""
+    data = _send(client, {"skill": "video.search", "q": "", "cat": "vid-cooking"})
+    assert data["total"] >= 1
+
+
+def test_video_lookup(client):
+    """video.lookup returns full video details."""
+    data = _send(client, {"skill": "video.lookup", "id": "VID-001"})
+    assert data["id"] == "VID-001"
+    assert data["title"] == "Best Wireless Earbuds 2026 — Top 5 Picks"
+    assert data["channel"] == "TechReviewer"
+    assert data["platform"] == "youtube"
+    assert data["duration_secs"] == 1245
+    assert data["views"] == 1_850_000
+    assert data["rating"] == 4.8
+    assert "chapters" in data
+    assert len(data["chapters"]) > 0
+    assert "tags" in data
+    assert "earbuds" in data["tags"]
+    assert data["transcript_summary"] != ""
+
+
+def test_video_lookup_not_found(client):
+    """video.lookup returns error for unknown video."""
+    result = _send(client, {"skill": "video.lookup", "id": "VID-NOPE"})
+    # Returns a failed task
+    assert result["status"]["state"] == "failed"
+
+
+def test_video_trending(client):
+    """video.trending returns videos sorted by views."""
+    data = _send(client, {"skill": "video.trending", "max": 3})
+    assert data["total"] == 3
+    # Should be ordered by views descending
+    views = [item[5] for item in data["items"]]  # views is index 5
+    assert views == sorted(views, reverse=True)
+
+
+def test_video_trending_by_category(client):
+    """video.trending accepts category filter."""
+    data = _send(client, {"skill": "video.trending", "cat": "vid-cooking"})
+    assert data["total"] >= 1
+
+
+def test_video_creator(client):
+    """video.creator returns channel profile and recent videos."""
+    data = _send(client, {"skill": "video.creator", "channel_id": "ch-techrev"})
+    assert data["channel_id"] == "ch-techrev"
+    assert data["name"] == "TechReviewer"
+    assert data["subscribers"] == 2_400_000
+    assert data["verified"] is True
+    assert "recent_uploads" in data
+    assert len(data["recent_uploads"]["items"]) >= 1
+
+
+def test_video_creator_not_found(client):
+    """video.creator returns error for unknown channel."""
+    result = _send(client, {"skill": "video.creator", "channel_id": "ch-nope"})
+    assert result["status"]["state"] == "failed"
+
+
+def test_video_categories(client):
+    """video.categories lists top-level video categories."""
+    data = _send(client, {"skill": "video.categories"})
+    assert "cats" in data
+    assert len(data["cats"]) >= 3
+    labels = [c[1] for c in data["cats"]]
+    assert "Technology" in labels
+
+
+def test_video_categories_children(client):
+    """video.categories with parent returns children."""
+    data = _send(client, {"skill": "video.categories", "parent": "vid-tech"})
+    labels = [c[1] for c in data["cats"]]
+    assert "Product Reviews" in labels
+
+
+def test_video_playlist_get(client):
+    """video.playlist returns playlist details with video list."""
+    data = _send(client, {"skill": "video.playlist", "id": "pl-001"})
+    assert data["id"] == "pl-001"
+    assert data["title"] == "Best of Tech Reviews 2026"
+    assert data["total"] == 2
+    assert len(data["items"]) == 2
+
+
+def test_video_playlist_list(client):
+    """video.playlist without id lists all playlists."""
+    data = _send(client, {"skill": "video.playlist"})
+    assert "playlists" in data
+    assert data["total"] >= 2
+
+
+def test_video_transcript(client):
+    """video.transcript searches video transcripts."""
+    data = _send(client, {"skill": "video.transcript", "q": "transformer attention"})
+    assert data["total"] >= 1
+    found = [r for r in data["results"] if r["id"] == "VID-003"]
+    assert len(found) == 1
+    assert "transcript_summary" in found[0]
+
+
+def test_video_recommend(client):
+    """video.recommend returns similar videos."""
+    data = _send(client, {"skill": "video.recommend", "video_id": "VID-001"})
+    assert data["total"] >= 1
+    assert data["based_on"] == "VID-001"
+    # Should not include the source video itself
+    ids = [item[0] for item in data["items"]]
+    assert "VID-001" not in ids
+
+
+def test_video_recommend_by_category(client):
+    """video.recommend by category returns results."""
+    data = _send(client, {"skill": "video.recommend", "cat": "vid-programming"})
+    assert data["total"] >= 1

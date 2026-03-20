@@ -37,6 +37,7 @@ from src.server.rtb import RTBEngine
 from src.server.skills import SkillRouter
 from src.server.store import CatalogStore
 from src.server.vendor_analytics import VendorAnalytics
+from src.server.video_skills import VideoSkillRouter
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -60,6 +61,7 @@ AGENT_CARD_PATH = Path(__file__).resolve().parent.parent.parent / "schemas" / "a
 
 store: CatalogStore | None = None
 router: SkillRouter | None = None
+video_router: VideoSkillRouter | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +70,7 @@ router: SkillRouter | None = None
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    global store, router
+    global store, router, video_router
     store = CatalogStore(DB_PATH)
     ad_engine = AdEngine(store)
     tracker = AgentTracker(store)
@@ -88,6 +90,7 @@ async def lifespan(app: Starlette):
         federation, embeddings, analytics,
         retargeting, affiliates, rtb, promotions, audience, attribution,
     )
+    video_router = VideoSkillRouter(store)
 
     # Seed demo data if empty
     if not store.list_categories():
@@ -183,8 +186,14 @@ def _handle_task_send(rpc_id: Any, params: dict, agent_id: str = "") -> JSONResp
     # Check if client requested AXON format
     use_axon = str(skill_data.pop("format", "")).lower() == "axon"
 
+    # Dispatch to the correct router
+    skill_name = skill_data.get("skill", "")
     assert router is not None
-    result_data = router.handle(skill_data, agent_id=agent_id)
+    assert video_router is not None
+    if video_router.can_handle(skill_name):
+        result_data = video_router.handle(skill_data, agent_id=agent_id)
+    else:
+        result_data = router.handle(skill_data, agent_id=agent_id)
 
     if "error" in result_data:
         return JSONResponse({
@@ -348,6 +357,194 @@ def _seed_demo_data(s: CatalogStore) -> None:
         bid_cents=15,
         priority=5,
     ))
+
+    # ---------------------------------------------------------------
+    # Video seed data
+    # ---------------------------------------------------------------
+    from src.common.models import VideoCategory, VideoChannel, VideoItem, VideoPlaylist
+
+    # Video channels
+    video_channels = [
+        VideoChannel("ch-techrev", "TechReviewer", "youtube", 2_400_000, 342,
+                     "In-depth tech product reviews and comparisons",
+                     verified=True),
+        VideoChannel("ch-codeschool", "CodeSchool", "youtube", 890_000, 215,
+                     "Programming tutorials and software engineering",
+                     verified=True),
+        VideoChannel("ch-ailab", "AI Lab", "youtube", 1_100_000, 178,
+                     "AI research explainers and tutorials",
+                     verified=True),
+        VideoChannel("ch-cookpro", "Cook Pro", "youtube", 3_200_000, 520,
+                     "Professional cooking tutorials and recipes",
+                     verified=True),
+        VideoChannel("ch-fitlife", "FitLife", "vimeo", 450_000, 98,
+                     "Fitness workouts and nutrition guides"),
+    ]
+    for ch in video_channels:
+        s.upsert_video_channel(ch)
+
+    # Video categories
+    video_cats = [
+        VideoCategory("vid-tech", "Technology", None, 3),
+        VideoCategory("vid-reviews", "Product Reviews", "vid-tech", 2),
+        VideoCategory("vid-tutorials", "Tutorials", None, 3),
+        VideoCategory("vid-programming", "Programming", "vid-tutorials", 2),
+        VideoCategory("vid-ai", "Artificial Intelligence", "vid-tech", 1),
+        VideoCategory("vid-cooking", "Cooking", None, 2),
+        VideoCategory("vid-fitness", "Fitness", None, 1),
+    ]
+    for c in video_cats:
+        s.upsert_video_category(c)
+
+    # Video items
+    videos = [
+        VideoItem(
+            "VID-001", "Best Wireless Earbuds 2026 — Top 5 Picks",
+            "Comprehensive comparison of the best wireless earbuds available in 2026. "
+            "We test sound quality, ANC, battery life, and comfort.",
+            "ch-techrev", "youtube", "vid-reviews",
+            duration_secs=1245, views=1_850_000, likes=92_000, rating=4.8,
+            thumbnail_url="https://cdn.example.com/vid001-thumb.webp",
+            video_url="https://youtube.com/watch?v=example001",
+            transcript_summary="Comparison of 5 wireless earbuds: SoundPod Pro, BassX Buds, "
+                               "ClearAir S1, and two others. SoundPod Pro wins for ANC, ClearAir S1 for battery.",
+            tags=["earbuds", "wireless", "review", "comparison", "2026"],
+            chapters=[["0:00", "Intro"], ["2:15", "Sound Quality"], ["8:30", "ANC Test"],
+                      ["14:00", "Battery Life"], ["18:45", "Verdict"]],
+            resolution="4K", language="en",
+        ),
+        VideoItem(
+            "VID-002", "Building AI Agents with Python — Complete Guide",
+            "Step-by-step tutorial on building autonomous AI agents using Python. "
+            "Covers planning, tool use, memory, and multi-agent orchestration.",
+            "ch-codeschool", "youtube", "vid-programming",
+            duration_secs=3600, views=720_000, likes=48_000, rating=4.9,
+            thumbnail_url="https://cdn.example.com/vid002-thumb.webp",
+            video_url="https://youtube.com/watch?v=example002",
+            transcript_summary="Full tutorial on building AI agents. Covers LangChain, "
+                               "AutoGen, and custom agent frameworks. Includes code examples.",
+            tags=["python", "ai", "agents", "tutorial", "programming"],
+            chapters=[["0:00", "Intro"], ["5:00", "Agent Architecture"],
+                      ["20:00", "Tool Integration"], ["45:00", "Multi-Agent Systems"]],
+            resolution="1080p", language="en",
+        ),
+        VideoItem(
+            "VID-003", "Transformer Architecture Explained Simply",
+            "Clear explanation of the Transformer architecture, attention mechanisms, "
+            "and why they power modern AI. No PhD required.",
+            "ch-ailab", "youtube", "vid-ai",
+            duration_secs=1800, views=2_100_000, likes=130_000, rating=4.7,
+            thumbnail_url="https://cdn.example.com/vid003-thumb.webp",
+            video_url="https://youtube.com/watch?v=example003",
+            transcript_summary="Explains transformer architecture from scratch. Covers "
+                               "self-attention, multi-head attention, positional encoding, "
+                               "and decoder-only vs encoder-decoder models.",
+            tags=["ai", "transformer", "deep-learning", "explainer"],
+            chapters=[["0:00", "Why Transformers?"], ["3:00", "Self-Attention"],
+                      ["12:00", "Multi-Head Attention"], ["22:00", "Modern LLMs"]],
+            resolution="4K", language="en",
+        ),
+        VideoItem(
+            "VID-004", "Perfect Homemade Pasta from Scratch",
+            "Learn to make fresh pasta at home with just flour and eggs. "
+            "Includes three sauce recipes.",
+            "ch-cookpro", "youtube", "vid-cooking",
+            duration_secs=960, views=4_500_000, likes=280_000, rating=4.9,
+            thumbnail_url="https://cdn.example.com/vid004-thumb.webp",
+            video_url="https://youtube.com/watch?v=example004",
+            transcript_summary="Step by step pasta making guide. Covers egg pasta dough, "
+                               "rolling techniques, and three classic sauces: cacio e pepe, "
+                               "carbonara, and arrabbiata.",
+            tags=["cooking", "pasta", "recipe", "italian", "homemade"],
+            chapters=[["0:00", "Ingredients"], ["2:00", "Making Dough"],
+                      ["8:00", "Rolling & Cutting"], ["12:00", "Three Sauces"]],
+            resolution="4K", language="en",
+        ),
+        VideoItem(
+            "VID-005", "30-Minute Full Body HIIT Workout",
+            "High-intensity interval training for all fitness levels. "
+            "No equipment needed.",
+            "ch-fitlife", "vimeo", "vid-fitness",
+            duration_secs=1800, views=890_000, likes=52_000, rating=4.6,
+            thumbnail_url="https://cdn.example.com/vid005-thumb.webp",
+            video_url="https://vimeo.com/example005",
+            transcript_summary="30 minute HIIT workout. Warm-up, 6 rounds of high-intensity "
+                               "exercises, cool-down stretches. Modifications shown for beginners.",
+            tags=["fitness", "hiit", "workout", "no-equipment"],
+            chapters=[["0:00", "Warm Up"], ["5:00", "Round 1"],
+                      ["10:00", "Round 2-3"], ["20:00", "Round 4-6"],
+                      ["27:00", "Cool Down"]],
+            resolution="1080p", language="en",
+        ),
+        VideoItem(
+            "VID-006", "SoundPod Pro — Detailed Review and Teardown",
+            "Full review of the SoundPod Pro wireless earbuds including sound test, "
+            "teardown, and comparison with competitors.",
+            "ch-techrev", "youtube", "vid-reviews",
+            duration_secs=2100, views=960_000, likes=61_000, rating=4.7,
+            thumbnail_url="https://cdn.example.com/vid006-thumb.webp",
+            video_url="https://youtube.com/watch?v=example006",
+            transcript_summary="In-depth SoundPod Pro review. Tests ANC in multiple environments, "
+                               "teardown shows 12mm driver and ANC chip. Compared to BassX and ClearAir.",
+            tags=["soundpod", "earbuds", "review", "teardown"],
+            chapters=[["0:00", "Unboxing"], ["3:00", "Sound Test"],
+                      ["12:00", "ANC Test"], ["20:00", "Teardown"],
+                      ["30:00", "Verdict"]],
+            resolution="4K", language="en",
+        ),
+        VideoItem(
+            "VID-007", "Python Async Programming — From Zero to Hero",
+            "Master async/await in Python. Covers asyncio, aiohttp, "
+            "and real-world patterns for concurrent programming.",
+            "ch-codeschool", "youtube", "vid-programming",
+            duration_secs=2700, views=410_000, likes=29_000, rating=4.8,
+            thumbnail_url="https://cdn.example.com/vid007-thumb.webp",
+            video_url="https://youtube.com/watch?v=example007",
+            transcript_summary="Complete async Python course. Coroutines, event loops, "
+                               "TaskGroups, aiohttp client/server, structured concurrency patterns.",
+            tags=["python", "async", "asyncio", "programming", "tutorial"],
+            chapters=[["0:00", "Why Async?"], ["5:00", "Coroutines Basics"],
+                      ["15:00", "asyncio Deep Dive"], ["30:00", "Real World Patterns"]],
+            resolution="1080p", language="en",
+        ),
+        VideoItem(
+            "VID-008", "5 Japanese Recipes Every Home Cook Should Know",
+            "Essential Japanese home cooking recipes: miso soup, "
+            "tamagoyaki, onigiri, teriyaki, and gyudon.",
+            "ch-cookpro", "youtube", "vid-cooking",
+            duration_secs=1500, views=2_800_000, likes=175_000, rating=4.8,
+            thumbnail_url="https://cdn.example.com/vid008-thumb.webp",
+            video_url="https://youtube.com/watch?v=example008",
+            transcript_summary="Five Japanese recipes: dashi-based miso soup, "
+                               "tamagoyaki technique, onigiri shaping, teriyaki sauce from scratch, "
+                               "and quick gyudon (beef bowl).",
+            tags=["cooking", "japanese", "recipe", "miso", "teriyaki"],
+            chapters=[["0:00", "Miso Soup"], ["5:00", "Tamagoyaki"],
+                      ["10:00", "Onigiri"], ["15:00", "Teriyaki"],
+                      ["20:00", "Gyudon"]],
+            resolution="4K", language="en",
+        ),
+    ]
+    for v in videos:
+        s.upsert_video(v)
+
+    # Video playlists
+    playlists = [
+        VideoPlaylist(
+            "pl-001", "Best of Tech Reviews 2026",
+            "Top tech product reviews of 2026",
+            "ch-techrev",
+            ["VID-001", "VID-006"],
+        ),
+        VideoPlaylist(
+            "pl-002", "Learn Python from Scratch",
+            "Complete Python learning path",
+            "ch-codeschool",
+            ["VID-002", "VID-007"],
+        ),
+    ]
+    for pl in playlists:
+        s.upsert_video_playlist(pl)
 
 
 # ---------------------------------------------------------------------------

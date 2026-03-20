@@ -1,8 +1,8 @@
 {
   "name": "A2A Sales Catalog",
-  "description": "Agent marketplace for product and service discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, and cross-sell — all over A2A.",
+  "description": "Agent marketplace for product, service, and video content discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, cross-sell, and video catalog — all over A2A.",
   "url": "https://catalog.example.com",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,
@@ -161,6 +161,69 @@
       "name": "A/B Test Results",
       "description": "Get aggregated A/B test results for ad creative variants. Includes impressions, clicks, conversions, CTR, and CVR per variant.",
       "examples": ["Get A/B test results for group 'headline-test'"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.search",
+      "name": "Search Videos",
+      "description": "Search for video content across platforms by query, with filters for category, platform, channel, and duration.",
+      "examples": ["Find Python tutorials", "Search for earbuds reviews on YouTube under 20 minutes"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.lookup",
+      "name": "Video Details",
+      "description": "Get full details for a specific video including description, transcript summary, chapters, tags, and metadata.",
+      "examples": ["Get details for video VID-001"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.trending",
+      "name": "Trending Videos",
+      "description": "Get trending and popular videos, optionally filtered by category. Sorted by views.",
+      "examples": ["Show trending tech videos", "What's popular in cooking?"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.creator",
+      "name": "Creator Profile",
+      "description": "Get a content creator/channel profile including subscriber count, video count, and recent uploads.",
+      "examples": ["Show me TechReviewer's channel info"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.categories",
+      "name": "Video Categories",
+      "description": "List available video content categories, optionally scoped to a parent category.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.playlist",
+      "name": "Video Playlists",
+      "description": "Get a specific playlist with video details, or list available playlists. Supports channel-scoped listing.",
+      "examples": ["Show playlist pl-001", "List playlists from CodeSchool"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.transcript",
+      "name": "Transcript Search",
+      "description": "Search video transcripts and summaries for specific content. Returns videos with matching transcript excerpts.",
+      "examples": ["Find videos that discuss transformer architecture", "Search transcripts for async programming"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "video.recommend",
+      "name": "Video Recommendations",
+      "description": "Get personalized video recommendations based on a specific video or category. Excludes the source video.",
+      "examples": ["Recommend videos similar to VID-001", "Suggest cooking videos"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     }
