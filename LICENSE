@@ -98,7 +98,17 @@ Advertising & Monetization:
 - Campaign scheduling and dayparting for agent-targeted advertising
   with date range, hour-of-day, and day-of-week constraints
 
-First published: March 19, 2026.
+First published: March 19, 2026 (v0.1.0).
+Revised: March 19, 2026 (v0.2.0) — added agent tracking, reputation,
+  negotiation, purchase, federation, embeddings, vendor analytics,
+  intent-tiered bidding.
+Revised: March 19, 2026 (v0.3.0) — added display ads, retargeting,
+  affiliate/referral, RTB auctions, frequency capping, A/B testing,
+  audience segments, conversion attribution, promotions, cross-sell/upsell,
+  creative rotation, campaign scheduling/dayparting.
+Revised: March 19, 2026 (v0.4.0) — added AXON (Agent eXchange Object
+  Notation) proprietary wire format with sigil-typed values, schema-indexed
+  columns, pipe delimiters, and section blocks.
 
 CONTACT
 -------
