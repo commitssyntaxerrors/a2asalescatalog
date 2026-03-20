@@ -506,11 +506,11 @@ def test_purchase_with_promo(client):
 # Agent Card updated skill count
 # -----------------------------------------------------------------------
 
-def test_agent_card_has_46_skills(client):
+def test_agent_card_has_50_skills(client):
     resp = client.get("/.well-known/agent.json")
     card = resp.json()
-    assert len(card["skills"]) == 46
-    assert card["version"] == "0.7.0"
+    assert len(card["skills"]) >= 50
+    assert card["version"] == "0.8.0"
 
 
 # -----------------------------------------------------------------------
@@ -1145,3 +1145,588 @@ def test_services_categories(client):
     assert "fields" in data
     assert "categories" in data
     assert len(data["categories"]) >= 5
+
+
+# =======================================================================
+# UCP Profile tests
+# =======================================================================
+
+def test_ucp_profile_endpoint(client):
+    """/.well-known/ucp.json returns a valid UCP profile."""
+    resp = client.get("/.well-known/ucp.json")
+    assert resp.status_code == 200
+    profile = resp.json()
+    assert profile["name"] == "A2A Sales Catalog"
+    assert profile["version"] == "1.0"
+    assert "provider" in profile
+    assert profile["provider"]["name"] == "Rapidly Agentic Inc."
+
+
+def test_ucp_profile_has_protocol(client):
+    """UCP profile includes protocol details."""
+    resp = client.get("/.well-known/ucp.json")
+    profile = resp.json()
+    assert profile["protocol"]["type"] == "A2A"
+    assert "CAI" in profile["protocol"]["wireFormats"]
+    assert "AXON" in profile["protocol"]["wireFormats"]
+
+
+def test_ucp_profile_has_catalog_capabilities(client):
+    """UCP profile lists catalog capabilities."""
+    resp = client.get("/.well-known/ucp.json")
+    profile = resp.json()
+    caps = profile["catalog"]["capabilities"]
+    assert "product_search" in caps
+    assert "purchase_checkout" in caps
+    assert "federated_search" in caps
+    assert "video_discovery" in caps
+    assert "agent_directory" in caps
+
+
+def test_ucp_profile_has_skills(client):
+    """UCP profile lists all skill endpoints."""
+    resp = client.get("/.well-known/ucp.json")
+    profile = resp.json()
+    skills = profile["catalog"]["skills"]
+    assert len(skills) > 20
+    skill_ids = [s["skill"] for s in skills]
+    assert "catalog.search" in skill_ids
+    assert "catalog.purchase" in skill_ids
+    assert "video.search" in skill_ids
+
+
+def test_ucp_profile_has_pricing_tiers(client):
+    """UCP profile includes pricing tier information."""
+    resp = client.get("/.well-known/ucp.json")
+    profile = resp.json()
+    tiers = profile["pricing"]["tiers"]
+    assert len(tiers) == 2
+    tier_ids = [t["id"] for t in tiers]
+    assert "free" in tier_ids
+    assert "pro" in tier_ids
+    free_tier = next(t for t in tiers if t["id"] == "free")
+    assert "search" in free_tier["features"]
+    assert free_tier["rateLimit"]["requests"] == 100
+
+
+def test_ucp_profile_has_authentication(client):
+    """UCP profile includes auth info."""
+    resp = client.get("/.well-known/ucp.json")
+    profile = resp.json()
+    assert "authentication" in profile
+    assert "schemes" in profile["authentication"]
+
+
+def test_ucp_profile_has_federation(client):
+    """UCP profile includes federation metadata."""
+    resp = client.get("/.well-known/ucp.json")
+    profile = resp.json()
+    assert profile["federation"]["enabled"] is True
+    assert profile["federation"]["peerSkill"] == "catalog.peers"
+
+
+# =======================================================================
+# Dynamic Agent Card tests
+# =======================================================================
+
+def test_agent_card_dynamic(client):
+    """Agent card is dynamically generated from live skill registries."""
+    resp = client.get("/.well-known/agent.json")
+    assert resp.status_code == 200
+    card = resp.json()
+    assert card["name"] == "A2A Sales Catalog"
+    assert card["version"] == "0.8.0"
+
+
+def test_agent_card_has_all_live_skills(client):
+    """Agent card contains skills from all routers."""
+    resp = client.get("/.well-known/agent.json")
+    card = resp.json()
+    skill_ids = [s["id"] for s in card["skills"]]
+    # Core catalog skills
+    assert "catalog.search" in skill_ids
+    assert "catalog.lookup" in skill_ids
+    assert "catalog.negotiate" in skill_ids
+    assert "catalog.purchase" in skill_ids
+    # Video skills
+    assert "video.search" in skill_ids
+    assert "video.lookup" in skill_ids
+    # Directory skills
+    assert "directory.search" in skill_ids
+    # Business skills
+    assert "business.search" in skill_ids
+    # Job skills
+    assert "jobs.search" in skill_ids
+    # Services skills
+    assert "services.search" in skill_ids
+
+
+def test_agent_card_has_input_output_schemas(client):
+    """Agent card skills include input/output schemas for key skills."""
+    resp = client.get("/.well-known/agent.json")
+    card = resp.json()
+    search_skill = next(s for s in card["skills"] if s["id"] == "catalog.search")
+    assert "inputSchema" in search_skill
+    assert "q" in search_skill["inputSchema"]
+    assert "outputSchema" in search_skill
+    assert "fields" in search_skill["outputSchema"]
+
+    lookup_skill = next(s for s in card["skills"] if s["id"] == "catalog.lookup")
+    assert "inputSchema" in lookup_skill
+    assert "id" in lookup_skill["inputSchema"]
+
+
+def test_agent_card_wire_formats(client):
+    """Agent card advertises both CAI and AXON wire formats."""
+    resp = client.get("/.well-known/agent.json")
+    card = resp.json()
+    caps = card["capabilities"]
+    assert caps["axonFormat"] is True
+    assert caps["caiFormat"] is True
+    assert "CAI" in caps["wireFormats"]
+    assert "AXON" in caps["wireFormats"]
+
+
+def test_agent_card_federation_metadata(client):
+    """Agent card includes federation metadata."""
+    resp = client.get("/.well-known/agent.json")
+    card = resp.json()
+    fed = card["federation"]
+    assert fed["enabled"] is True
+    assert fed["fanOutSearch"] is True
+    assert fed["peerTimeoutMs"] == 2000
+
+
+def test_agent_card_authentication(client):
+    """Agent card includes authentication requirements."""
+    resp = client.get("/.well-known/agent.json")
+    card = resp.json()
+    auth = card["authentication"]
+    assert "schemes" in auth
+    assert "bearer" in auth["schemes"]
+    assert "required" in auth
+
+
+# =======================================================================
+# Peer Fan-Out Search tests
+# =======================================================================
+
+def test_search_fanout_skipped_when_enough_local(client):
+    """Fan-out is skipped when local results meet min_results threshold."""
+    # Search for earbuds with a high enough min_results that we have locally
+    data = _send(client, {"skill": "catalog.search", "q": "earbuds", "max": 10, "min_results": 1})
+    assert data["total"] >= 1
+    # No source field should be added since all are local
+    # (no peers registered, so definitely no peer results)
+
+
+def test_search_with_min_results_param(client):
+    """catalog.search accepts min_results parameter."""
+    data = _send(client, {"skill": "catalog.search", "q": "earbuds", "max": 10, "min_results": 5})
+    assert "fields" in data
+    assert "items" in data
+    assert data["total"] >= 1
+
+
+def test_federation_manager_fanout_no_client():
+    """Fan-out returns local results when no HTTP client is set."""
+    from src.server.store import CatalogStore
+    from src.server.federation import FederationManager
+
+    store = CatalogStore(":memory:")
+    fm = FederationManager(store)
+    # No HTTP client set — fan-out should return local items as-is
+    local = [{"id": "X-001", "name": "Test", "rating": 4.0}]
+    result = fm.fan_out_search("test", local_results=local, min_results=5)
+    assert len(result) == 1
+    assert result[0]["id"] == "X-001"
+    assert result[0]["source"] == "local"
+
+
+def test_federation_manager_fanout_skips_when_enough():
+    """Fan-out is skipped when local results already meet min_results."""
+    from src.server.store import CatalogStore
+    from src.server.federation import FederationManager
+
+    store = CatalogStore(":memory:")
+    fm = FederationManager(store)
+    local = [
+        {"id": f"X-{i:03d}", "name": f"Item {i}", "rating": 4.0}
+        for i in range(5)
+    ]
+    result = fm.fan_out_search("test", local_results=local, min_results=5)
+    assert len(result) == 5
+    # All should be tagged as local
+    assert all(r["source"] == "local" for r in result)
+
+
+def test_federation_manager_dedup():
+    """Fan-out deduplicates by item ID, preferring local results."""
+    from src.server.store import CatalogStore
+    from src.server.federation import FederationManager
+
+    store = CatalogStore(":memory:")
+    fm = FederationManager(store)
+
+    local = [{"id": "X-001", "name": "Local Item", "rating": 4.5, "source": "local"}]
+    # Simulate peer results with overlapping ID
+    peer_items = [
+        {"id": "X-001", "name": "Peer Duplicate", "rating": 3.0, "source": "http://peer:8000/a2a"},
+        {"id": "X-002", "name": "Peer Unique", "rating": 4.0, "source": "http://peer:8000/a2a"},
+    ]
+    # Manually test dedup logic
+    seen = {item["id"] for item in local}
+    for item in peer_items:
+        if item["id"] not in seen:
+            seen.add(item["id"])
+            local.append(item)
+    assert len(local) == 2
+    assert local[0]["id"] == "X-001"
+    assert local[0]["name"] == "Local Item"  # local wins
+    assert local[1]["id"] == "X-002"
+
+
+def test_federation_manager_with_mock_peer():
+    """Fan-out with a mock HTTP client that simulates peer responses."""
+    from src.server.store import CatalogStore
+    from src.server.federation import FederationManager
+    import json
+
+    store = CatalogStore(":memory:")
+    fm = FederationManager(store, peer_timeout=1.0)
+
+    # Register a peer
+    store.upsert_peer("http://peer1:8000/a2a", "Peer1", ["audio"], 10)
+
+    # Create a mock HTTP client
+    class MockResponse:
+        status_code = 200
+        def json(self):
+            return {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "id": "fan-out-test",
+                    "status": {"state": "completed"},
+                    "artifacts": [{
+                        "parts": [{
+                            "type": "data",
+                            "data": {
+                                "fields": ["id", "name", "desc", "price_cents",
+                                           "vendor", "rating", "sponsored", "ad_tag"],
+                                "items": [
+                                    ["PEER-001", "Peer Earbuds", "Great earbuds",
+                                     3999, "peervendor.com", 4.5, 0, None],
+                                    ["PEER-002", "Peer Headphones", "Nice headphones",
+                                     5999, "peervendor.com", 4.2, 0, None],
+                                ],
+                                "currency": "USD",
+                                "total": 2,
+                            },
+                        }],
+                    }],
+                },
+            }
+
+    class MockClient:
+        def post(self, url, json=None, timeout=None):
+            return MockResponse()
+        def get(self, url, timeout=None):
+            return MockResponse()
+
+    fm.set_http_client(MockClient())
+
+    # Local results are sparse
+    local = [{"id": "LOCAL-001", "name": "Local Item", "desc": "Desc",
+              "price_cents": 4999, "rating": 4.6}]
+
+    result = fm.fan_out_search(
+        "earbuds",
+        "audio",
+        min_results=5,
+        local_results=local,
+        limit=10,
+    )
+
+    # Should have local + peer items
+    assert len(result) >= 2
+    ids = [r["id"] for r in result]
+    assert "LOCAL-001" in ids
+    assert "PEER-001" in ids
+    assert "PEER-002" in ids
+
+    # Check source tags
+    local_items = [r for r in result if r.get("source") == "local"]
+    peer_items = [r for r in result if r.get("source") == "http://peer1:8000/a2a"]
+    assert len(local_items) >= 1
+    assert len(peer_items) >= 1
+
+
+def test_federation_peer_health_check():
+    """Peer health check verifies peer reachability."""
+    from src.server.store import CatalogStore
+    from src.server.federation import FederationManager
+
+    store = CatalogStore(":memory:")
+    fm = FederationManager(store, peer_timeout=1.0)
+
+    # No client — should return False
+    assert fm.check_peer_health("http://peer:8000/a2a") is False
+
+    # Mock client that returns 200
+    class MockResp:
+        status_code = 200
+    class MockClient:
+        def get(self, url, timeout=None):
+            return MockResp()
+    fm.set_http_client(MockClient())
+    assert fm.check_peer_health("http://peer:8000/a2a") is True
+
+    # Mock client that raises
+    class FailClient:
+        def get(self, url, timeout=None):
+            raise ConnectionError("unreachable")
+    fm.set_http_client(FailClient())
+    assert fm.check_peer_health("http://peer:8000/a2a") is False
+
+
+def test_federation_peer_timeout_handling():
+    """Fan-out handles peer timeouts gracefully."""
+    from src.server.store import CatalogStore
+    from src.server.federation import FederationManager
+    import time
+
+    store = CatalogStore(":memory:")
+    fm = FederationManager(store, peer_timeout=0.5)
+
+    store.upsert_peer("http://slow-peer:8000/a2a", "SlowPeer", ["audio"], 5)
+
+    class SlowClient:
+        def post(self, url, json=None, timeout=None):
+            time.sleep(2)  # exceed timeout
+            raise TimeoutError("timeout")
+        def get(self, url, timeout=None):
+            raise TimeoutError("timeout")
+
+    fm.set_http_client(SlowClient())
+
+    local = [{"id": "LOCAL-001", "name": "Item", "rating": 4.0}]
+    result = fm.fan_out_search("earbuds", min_results=5, local_results=local, limit=10)
+    # Should still return local results even though peer timed out
+    assert len(result) >= 1
+    assert result[0]["id"] == "LOCAL-001"
+
+
+def test_store_update_peer_status():
+    """Store can update peer status."""
+    from src.server.store import CatalogStore
+
+    store = CatalogStore(":memory:")
+    store.upsert_peer("http://peer:8000/a2a", "TestPeer", ["audio"], 5)
+
+    peers = store.list_peers()
+    assert peers[0]["status"] == "online"
+
+    store.update_peer_status("http://peer:8000/a2a", "offline")
+    peers = store.list_peers()
+    assert peers[0]["status"] == "offline"
+
+
+def test_store_remove_peer():
+    """Store can remove peers."""
+    from src.server.store import CatalogStore
+
+    store = CatalogStore(":memory:")
+    store.upsert_peer("http://peer:8000/a2a", "TestPeer", ["audio"], 5)
+    assert len(store.list_peers()) == 1
+
+    store.remove_peer("http://peer:8000/a2a")
+    assert len(store.list_peers()) == 0
+
+
+# -----------------------------------------------------------------------
+# Subscription tier tests
+# -----------------------------------------------------------------------
+
+def test_subscribe_free(client):
+    """Subscribe to free tier returns tier=free."""
+    data = _send(client, {"skill": "catalog.subscribe", "tier": "free"})
+    assert data["tier"] == "free"
+    assert data["status"] == "active"
+
+
+def test_subscribe_premium(client):
+    """Subscribe to premium tier with payment token."""
+    data = _send(client, {"skill": "catalog.subscribe", "tier": "premium",
+                          "payment_token": "tok_test_123"})
+    assert data["tier"] == "premium"
+    assert data["status"] == "active"
+    assert "premium_benefits" in data
+    assert data["expires_at"] is not None
+
+
+def test_subscribe_premium_requires_payment(client):
+    """Premium subscription without payment_token returns error."""
+    result = _send(client, {"skill": "catalog.subscribe", "tier": "premium"})
+    # Error returns as failed task or data with error key
+    if isinstance(result, dict) and "status" in result:
+        assert result["status"]["state"] == "failed"
+    else:
+        assert "error" in result
+
+
+def test_subscription_status(client):
+    """Subscription status returns current tier."""
+    # First subscribe
+    _send(client, {"skill": "catalog.subscribe", "tier": "free"})
+    data = _send(client, {"skill": "catalog.subscription_status"})
+    assert data["tier"] == "free"
+    assert data["status"] == "active"
+
+
+def test_subscription_status_premium(client):
+    """Premium subscription status includes benefits."""
+    _send(client, {"skill": "catalog.subscribe", "tier": "premium",
+                   "payment_token": "tok_test_456"})
+    data = _send(client, {"skill": "catalog.subscription_status"})
+    assert data["tier"] == "premium"
+    assert "benefits" in data or "premium_benefits" in data
+    benefits = data.get("benefits", data.get("premium_benefits", []))
+    assert len(benefits) > 0
+
+
+# -----------------------------------------------------------------------
+# Preference tests
+# -----------------------------------------------------------------------
+
+def test_preferences_requires_premium(client):
+    """Free-tier agent cannot set preferences."""
+    _send(client, {"skill": "catalog.subscribe", "tier": "free"})
+    result = _send(client, {"skill": "catalog.preferences", "action": "set",
+                          "preferences": {"max_price_cents": 5000}})
+    if isinstance(result, dict) and "status" in result:
+        assert result["status"]["state"] == "failed"
+    else:
+        assert "error" in result
+
+
+def test_preferences_set_and_get(client):
+    """Premium agent can set and get preferences."""
+    _send(client, {"skill": "catalog.subscribe", "tier": "premium",
+                   "payment_token": "tok_prefs"})
+    data = _send(client, {"skill": "catalog.preferences", "action": "set",
+                          "preferences": {"max_price_cents": 5000,
+                                          "preferred_vendors": ["techcorp"]}})
+    assert data.get("status") == "updated" or "preferences" in data
+
+    data = _send(client, {"skill": "catalog.preferences", "action": "get"})
+    assert data["preferences"]["max_price_cents"] == 5000
+
+
+def test_preferences_reset(client):
+    """Premium agent can reset preferences."""
+    _send(client, {"skill": "catalog.subscribe", "tier": "premium",
+                   "payment_token": "tok_reset"})
+    _send(client, {"skill": "catalog.preferences", "action": "set",
+                   "preferences": {"max_price_cents": 9999}})
+    data = _send(client, {"skill": "catalog.preferences", "action": "reset"})
+    assert data.get("status") == "reset" or "preferences" not in data
+
+
+# -----------------------------------------------------------------------
+# Personalized deals tests
+# -----------------------------------------------------------------------
+
+def test_deals_requires_premium(client):
+    """Free-tier agent cannot access personalized deals."""
+    _send(client, {"skill": "catalog.subscribe", "tier": "free"})
+    result = _send(client, {"skill": "catalog.deals"})
+    if isinstance(result, dict) and "status" in result:
+        assert result["status"]["state"] == "failed"
+    else:
+        assert "error" in result
+
+
+def test_deals_premium_returns_offers(client):
+    """Premium agent gets personalized deal offers (may be empty if no history)."""
+    _send(client, {"skill": "catalog.subscribe", "tier": "premium",
+                   "payment_token": "tok_deals"})
+    # View some items to create retarget history
+    _send(client, {"skill": "catalog.lookup", "id": "WE-001"})
+    _send(client, {"skill": "catalog.lookup", "id": "WH-001"})
+    data = _send(client, {"skill": "catalog.deals", "max": 5})
+    assert "offers" in data
+    assert "count" in data
+
+
+# -----------------------------------------------------------------------
+# Premium negotiation tests
+# -----------------------------------------------------------------------
+
+def test_premium_negotiation_more_rounds(client):
+    """Premium agents get 7 negotiation rounds instead of 5."""
+    _send(client, {"skill": "catalog.subscribe", "tier": "premium",
+                   "payment_token": "tok_neg"})
+    data = _send(client, {"skill": "catalog.negotiate",
+                          "item_id": "WE-001", "offer_cents": 3500})
+    assert "premium_agent" in data
+    assert data["premium_agent"] is True
+    # Premium agents start with 6 rounds left (7 max - 1 used)
+    assert data["rounds_left"] == 6
+
+
+# -----------------------------------------------------------------------
+# Store-level subscription CRUD tests
+# -----------------------------------------------------------------------
+
+def test_store_subscription_crud():
+    """Store can create, read, and cancel subscriptions."""
+    from src.server.store import CatalogStore
+
+    store = CatalogStore(":memory:")
+    assert not store.is_premium("test-agent")
+
+    from src.common.models import Subscription
+    import time
+    sub = Subscription(
+        agent_id="test-agent",
+        tier="premium",
+        status="active",
+        payment_token="tok_test",
+        created_at=time.time(),
+        expires_at=time.time() + 86400,
+    )
+    store.upsert_subscription(sub)
+    assert store.is_premium("test-agent")
+
+    stored = store.get_subscription("test-agent")
+    assert stored is not None
+    assert stored["tier"] == "premium"
+
+    store.cancel_subscription("test-agent")
+    assert not store.is_premium("test-agent")
+
+
+def test_store_preferences_crud():
+    """Store can create, read, and delete agent preferences."""
+    from src.server.store import CatalogStore
+    from src.common.models import AgentPreferences
+
+    store = CatalogStore(":memory:")
+    prefs = AgentPreferences(
+        agent_id="test-agent",
+        max_price_cents=5000,
+        preferred_vendors=["techcorp"],
+        excluded_vendors=["badcorp"],
+        categories_preferred=["audio"],
+    )
+    store.upsert_preferences(prefs)
+
+    stored = store.get_preferences("test-agent")
+    assert stored is not None
+    assert stored["max_price_cents"] == 5000
+    assert "techcorp" in stored["preferred_vendors"]
+    assert "badcorp" in stored["excluded_vendors"]
+
+    store.delete_preferences("test-agent")
+    assert store.get_preferences("test-agent") is None

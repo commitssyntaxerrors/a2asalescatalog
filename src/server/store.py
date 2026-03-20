@@ -14,9 +14,9 @@ from typing import Any
 
 from src.common.models import (
     AdCampaign, AffiliateLink, AgentEvent, AgentInterest, AgentProfile,
-    AgentSegment, AgentSegmentMembership, CatalogItem, Category,
-    ConversionAttribution, CrossSellRule, FrequencyRecord,
-    NegotiationSession, Order, Promotion, TouchPoint, Vendor,
+    AgentPreferences, AgentSegment, AgentSegmentMembership, CatalogItem,
+    Category, ConversionAttribution, CrossSellRule, FrequencyRecord,
+    NegotiationSession, Order, Promotion, Subscription, TouchPoint, Vendor,
     VideoCategory, VideoChannel, VideoItem, VideoPlaylist,
     BusinessProfile, IndustryCategory, JobCategory, JobPosting,
     PersonProfile,
@@ -485,6 +485,32 @@ class CatalogStore:
                 parent_id TEXT,
                 service_count INTEGER DEFAULT 0
             );
+
+            -- Subscriptions & preferences
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                agent_id TEXT PRIMARY KEY,
+                tier TEXT DEFAULT 'free',
+                status TEXT DEFAULT 'active',
+                payment_token TEXT DEFAULT '',
+                created_at REAL,
+                expires_at REAL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_preferences (
+                agent_id TEXT PRIMARY KEY,
+                max_price_cents INTEGER DEFAULT 0,
+                min_rating REAL DEFAULT 0.0,
+                preferred_vendors TEXT DEFAULT '[]',
+                excluded_vendors TEXT DEFAULT '[]',
+                sustainability_weight REAL DEFAULT 0.0,
+                speed_weight REAL DEFAULT 0.0,
+                price_weight REAL DEFAULT 0.0,
+                brand_loyalty TEXT DEFAULT '[]',
+                geo_preference TEXT DEFAULT '',
+                categories_preferred TEXT DEFAULT '[]',
+                categories_excluded TEXT DEFAULT '[]',
+                updated_at REAL
+            );
         """)
         c.commit()
 
@@ -850,6 +876,17 @@ class CatalogStore:
     def list_peers(self) -> list[dict[str, Any]]:
         rows = self._conn.execute("SELECT * FROM federation_peers").fetchall()
         return [dict(r) for r in rows]
+
+    def remove_peer(self, url: str) -> None:
+        self._conn.execute("DELETE FROM federation_peers WHERE url = ?", (url,))
+        self._conn.commit()
+
+    def update_peer_status(self, url: str, status: str) -> None:
+        self._conn.execute(
+            "UPDATE federation_peers SET status = ? WHERE url = ?",
+            (status, url),
+        )
+        self._conn.commit()
 
     # ------------------------------------------------------------------
     # Affiliate links
@@ -1751,6 +1788,91 @@ class CatalogStore:
                 "UPDATE agent_services SET rating = ?, review_count = ?, updated_at = ? WHERE id = ?",
                 (round(agg["avg_r"], 2), agg["cnt"], rev.created_at, rev.service_id),
             )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Subscriptions
+    # ------------------------------------------------------------------
+
+    def upsert_subscription(self, sub: Subscription) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO subscriptions
+               (agent_id, tier, status, payment_token, created_at, expires_at)
+               VALUES (?,?,?,?,?,?)""",
+            (sub.agent_id, sub.tier, sub.status, sub.payment_token,
+             sub.created_at, sub.expires_at),
+        )
+        self._conn.commit()
+
+    def get_subscription(self, agent_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM subscriptions WHERE agent_id = ?", (agent_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def cancel_subscription(self, agent_id: str) -> None:
+        self._conn.execute(
+            "UPDATE subscriptions SET status = 'cancelled' WHERE agent_id = ?",
+            (agent_id,),
+        )
+        self._conn.commit()
+
+    def is_premium(self, agent_id: str) -> bool:
+        """Check if agent has an active premium subscription."""
+        import time as _t
+        row = self._conn.execute(
+            "SELECT * FROM subscriptions WHERE agent_id = ? AND tier = 'premium' AND status = 'active'",
+            (agent_id,),
+        ).fetchone()
+        if not row:
+            return False
+        if row["expires_at"] and row["expires_at"] < _t.time():
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Agent Preferences
+    # ------------------------------------------------------------------
+
+    def upsert_preferences(self, prefs: AgentPreferences) -> None:
+        import json
+        self._conn.execute(
+            """INSERT OR REPLACE INTO agent_preferences
+               (agent_id, max_price_cents, min_rating, preferred_vendors,
+                excluded_vendors, sustainability_weight, speed_weight,
+                price_weight, brand_loyalty, geo_preference,
+                categories_preferred, categories_excluded, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (prefs.agent_id, prefs.max_price_cents, prefs.min_rating,
+             json.dumps(prefs.preferred_vendors),
+             json.dumps(prefs.excluded_vendors),
+             prefs.sustainability_weight, prefs.speed_weight,
+             prefs.price_weight, json.dumps(prefs.brand_loyalty),
+             prefs.geo_preference,
+             json.dumps(prefs.categories_preferred),
+             json.dumps(prefs.categories_excluded),
+             prefs.updated_at),
+        )
+        self._conn.commit()
+
+    def get_preferences(self, agent_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM agent_preferences WHERE agent_id = ?", (agent_id,)
+        ).fetchone()
+        if not row:
+            return None
+        import json
+        d = dict(row)
+        for k in ("preferred_vendors", "excluded_vendors", "brand_loyalty",
+                   "categories_preferred", "categories_excluded"):
+            if isinstance(d[k], str):
+                d[k] = json.loads(d[k])
+        return d
+
+    def delete_preferences(self, agent_id: str) -> None:
+        self._conn.execute(
+            "DELETE FROM agent_preferences WHERE agent_id = ?", (agent_id,)
+        )
         self._conn.commit()
 
     def get_service_reviews(self, service_id: str, *, limit: int = 20) -> list[dict[str, Any]]:

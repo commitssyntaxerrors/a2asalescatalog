@@ -645,3 +645,36 @@ SERVICE_SEARCH_FIELDS = [
 ]
 SERVICE_CATEGORY_FIELDS = ["id", "label", "service_count"]
 SERVICE_REVIEW_FIELDS = ["id", "reviewer_agent_id", "rating", "comment", "created_at"]
+
+
+# ---------------------------------------------------------------------------
+# Premium Subscription & Agent Preferences
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class Subscription:
+    """Agent subscription record."""
+    agent_id: str
+    tier: str = "free"       # free, premium
+    status: str = "active"   # active, cancelled
+    payment_token: str = ""
+    created_at: float = field(default_factory=time.time)
+    expires_at: float = 0.0  # 0 = no expiry (free tier)
+
+
+@dataclass(slots=True)
+class AgentPreferences:
+    """Persistent preference profile for premium agents."""
+    agent_id: str
+    max_price_cents: int = 0            # 0 = no limit
+    min_rating: float = 0.0             # 0.0 = no filter
+    preferred_vendors: list[str] = field(default_factory=list)
+    excluded_vendors: list[str] = field(default_factory=list)
+    sustainability_weight: float = 0.0  # 0.0–1.0
+    speed_weight: float = 0.0           # urgency preference 0.0–1.0
+    price_weight: float = 0.0           # 0.0–1.0
+    brand_loyalty: list[str] = field(default_factory=list)  # preferred vendor domains
+    geo_preference: str = ""            # "lat,lng,radius_km" or empty
+    categories_preferred: list[str] = field(default_factory=list)
+    categories_excluded: list[str] = field(default_factory=list)
+    updated_at: float = field(default_factory=time.time)

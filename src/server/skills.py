@@ -26,6 +26,7 @@ from src.server.purchase import PurchaseEngine
 from src.server.retargeting import RetargetingEngine
 from src.server.rtb import RTBEngine
 from src.server.store import CatalogStore
+from src.server.subscriptions import SubscriptionEngine
 from src.server.vendor_analytics import VendorAnalytics
 
 COMPARE_BASE_FIELDS = ["id", "name", "price_cents", "rating", "review_count"]
@@ -50,6 +51,7 @@ class SkillRouter:
         promotions: PromotionEngine,
         audience: AudienceEngine,
         attribution: AttributionEngine,
+        subscriptions: SubscriptionEngine | None = None,
     ) -> None:
         self._store = store
         self._ads = ad_engine
@@ -65,6 +67,7 @@ class SkillRouter:
         self._promotions = promotions
         self._audience = audience
         self._attribution = attribution
+        self._subscriptions = subscriptions
         self._handlers: dict[str, Any] = {
             "catalog.search": self._handle_search,
             "catalog.lookup": self._handle_lookup,
@@ -86,6 +89,10 @@ class SkillRouter:
             "catalog.cross_sell": self._handle_cross_sell,
             "catalog.display_ads": self._handle_display_ads,
             "catalog.ab_results": self._handle_ab_results,
+            "catalog.subscribe": self._handle_subscribe,
+            "catalog.preferences": self._handle_preferences,
+            "catalog.subscription_status": self._handle_subscription_status,
+            "catalog.deals": self._handle_deals,
         }
 
     def handle(self, data: dict[str, Any], agent_id: str = "") -> dict[str, Any]:
@@ -108,6 +115,7 @@ class SkillRouter:
         sort = data.get("sort", "relevance")
         vendor = data.get("vendor")
         include_emb = data.get("include_embeddings", False)
+        min_results = int(data.get("min_results", 5))
 
         # Track event
         if agent_id:
@@ -123,10 +131,34 @@ class SkillRouter:
             limit=limit,
         )
 
+        # Federated peer fan-out when local results are sparse
+        if len(organic) < min_results:
+            local_as_dicts = []
+            for row in organic:
+                d = dict(row) if not isinstance(row, dict) else row
+                d["source"] = "local"
+                local_as_dicts.append(d)
+            merged = self._federation.fan_out_search(
+                q, cat,
+                min_results=min_results,
+                local_results=local_as_dicts,
+                limit=limit,
+            )
+            # Rebuild organic from merged (may contain peer items)
+            organic = merged
+
         # Intent-aware ad injection
         intent_tier = self._tracker.get_intent_tier(agent_id) if agent_id else "browse"
-        merged = self._ads.inject_sponsored(organic, q, cat, limit,
-                                            intent_tier=intent_tier, agent_id=agent_id)
+        is_premium = self._subscriptions and agent_id and self._store.is_premium(agent_id)
+
+        if is_premium:
+            # Premium agents get sponsored-free results
+            merged = organic if isinstance(organic, list) else list(organic)
+            # Ensure all items are dicts
+            merged = [dict(r) if not isinstance(r, dict) else r for r in merged]
+        else:
+            merged = self._ads.inject_sponsored(organic, q, cat, limit,
+                                                intent_tier=intent_tier, agent_id=agent_id)
 
         # Record ad touchpoints for attribution
         if agent_id:
@@ -136,8 +168,23 @@ class SkillRouter:
                         agent_id, "ad_impression", item_id=row["id"],
                     )
 
+        # Preference-aware re-ranking for premium agents
+        if is_premium and self._subscriptions:
+            merged = self._subscriptions.rerank_results(agent_id, merged)
+
         # Encode as compact tuples
         fields = SEARCH_FIELDS_WITH_EMB if include_emb else SEARCH_FIELDS
+        # Add source field for federated results
+        has_peer_results = any(r.get("source") and r["source"] != "local" for r in merged)
+        if has_peer_results:
+            fields = list(fields) + ["source"]
+        # Add preference_match_score field for premium agents
+        has_pref_score = any(r.get("preference_match_score") is not None for r in merged)
+        if has_pref_score:
+            fields = list(fields) if not isinstance(fields, list) else fields
+            if "preference_match_score" not in fields:
+                fields = list(fields) + ["preference_match_score"]
+
         items = []
         for row in merged:
             t = [
@@ -145,14 +192,18 @@ class SkillRouter:
                 row["name"],
                 row["desc"],
                 row["price_cents"],
-                row.get("vendor_domain", row["vendor_id"]),
+                row.get("vendor_domain", row.get("vendor_id", row.get("vendor", ""))),
                 row["rating"],
-                row["sponsored"],
+                row.get("sponsored", 0),
                 row.get("ad_tag"),
             ]
             if include_emb:
                 embs = self._embeddings.get_item_embeddings([row["id"]])
                 t.append(embs[0][1] if embs else "")
+            if has_peer_results:
+                t.append(row.get("source", "local"))
+            if has_pref_score:
+                t.append(row.get("preference_match_score"))
             items.append(t)
 
         return {
@@ -292,6 +343,10 @@ class SkillRouter:
         # Track event
         item_id = data.get("item_id", "")
         self._tracker.log(agent_id, "negotiate", item_id=item_id)
+        # Pass premium negotiation params if subscriptions engine is available
+        if self._subscriptions:
+            neg_params = self._subscriptions.get_negotiation_params(agent_id)
+            data = {**data, "_premium_params": neg_params}
         return self._negotiation.negotiate(agent_id, data)
 
     # ------------------------------------------------------------------
@@ -513,4 +568,86 @@ class SkillRouter:
                 for r in results
             ],
             "count": len(results),
+        }
+
+    # ------------------------------------------------------------------
+    # catalog.subscribe
+    # ------------------------------------------------------------------
+
+    def _handle_subscribe(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        if not self._subscriptions:
+            return {"error": "Subscriptions not available"}
+        return self._subscriptions.subscribe(agent_id, data)
+
+    # ------------------------------------------------------------------
+    # catalog.preferences
+    # ------------------------------------------------------------------
+
+    def _handle_preferences(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        if not self._subscriptions:
+            return {"error": "Subscriptions not available"}
+        return self._subscriptions.preferences(agent_id, data)
+
+    # ------------------------------------------------------------------
+    # catalog.subscription_status
+    # ------------------------------------------------------------------
+
+    def _handle_subscription_status(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        if not self._subscriptions:
+            return {"error": "Subscriptions not available"}
+        return self._subscriptions.subscription_status(agent_id, data)
+
+    # ------------------------------------------------------------------
+    # catalog.deals
+    # ------------------------------------------------------------------
+
+    def _handle_deals(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        """Personalized deal alerts — preference-matched retargeting."""
+        if not agent_id:
+            return {"error": "Authentication required for deals"}
+        if not self._subscriptions:
+            return {"error": "Subscriptions not available"}
+        if not self._store.is_premium(agent_id):
+            return {"error": "Premium subscription required for personalized deals"}
+
+        max_offers = min(int(data.get("max", 5)), 20)
+        # Get base retarget offers
+        offers = self._retargeting.get_retarget_offers(agent_id, max_offers=max_offers * 3)
+        if not offers:
+            return {"agent_id": agent_id, "offers": [], "count": 0}
+
+        # Enrich offers with full item data for preference matching
+        prefs = self._store.get_preferences(agent_id)
+        if prefs:
+            scored_offers: list[dict[str, Any]] = []
+            for offer in offers:
+                vendor = offer.get("vendor", "")
+                # Hard-filter excluded vendors
+                if prefs["excluded_vendors"] and vendor in prefs["excluded_vendors"]:
+                    continue
+                # Hard-filter max price
+                if prefs["max_price_cents"] and offer["offer_price_cents"] > prefs["max_price_cents"]:
+                    continue
+
+                # Score against preferences
+                score = 0.0
+                if vendor in prefs.get("preferred_vendors", []):
+                    score += 3.0
+                if vendor in prefs.get("brand_loyalty", []):
+                    score += 2.0
+                # Price attractiveness: bigger discount = higher score
+                score += offer.get("discount_pct", 0) * 0.1
+                offer["preference_match_score"] = round(score, 2)
+                scored_offers.append(offer)
+
+            # Sort by preference match score
+            scored_offers.sort(key=lambda x: x.get("preference_match_score", 0), reverse=True)
+            offers = scored_offers[:max_offers]
+        else:
+            offers = offers[:max_offers]
+
+        return {
+            "agent_id": agent_id,
+            "offers": offers,
+            "count": len(offers),
         }

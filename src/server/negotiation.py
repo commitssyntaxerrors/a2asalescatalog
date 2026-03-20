@@ -37,6 +37,12 @@ class NegotiationEngine:
         offer_cents = int(data.get("offer_cents", 0))
         session_id = data.get("session_id")
 
+        # Premium negotiation params (injected by SkillRouter)
+        pp = data.pop("_premium_params", None) or {}
+        max_rounds = int(pp.get("max_rounds", MAX_ROUNDS))
+        floor_ratio = float(pp.get("floor_ratio", 0.70))
+        is_premium = bool(pp.get("premium_agent", False))
+
         # Check agent reputation
         profile = self._store.get_or_create_agent(agent_id)
         if profile["reputation"] < MIN_REPUTATION:
@@ -48,20 +54,25 @@ class NegotiationEngine:
             return {"error": f"Item not found: {item_id}"}
 
         list_price = item["price_cents"]
-        floor = item.get("vendor_floor_cents") or int(list_price * 0.70)  # default floor 70%
+        floor = item.get("vendor_floor_cents") or int(list_price * floor_ratio)
 
         # Validate offer
-        min_offer = int(list_price * MIN_OFFER_RATIO)
+        min_offer_ratio = pp.get("min_offer_ratio", MIN_OFFER_RATIO)
+        min_offer = int(list_price * min_offer_ratio)
         if offer_cents < min_offer:
-            return {"error": f"Offer {offer_cents} below minimum {min_offer} (60% of list price)"}
+            return {"error": f"Offer {offer_cents} below minimum {min_offer} ({int(min_offer_ratio*100)}% of list price)"}
 
         if session_id:
-            return self._continue_session(session_id, agent_id, offer_cents, floor, list_price)
+            return self._continue_session(session_id, agent_id, offer_cents,
+                                          floor, list_price, max_rounds, is_premium)
         else:
-            return self._new_session(agent_id, item_id, offer_cents, floor, list_price)
+            return self._new_session(agent_id, item_id, offer_cents,
+                                     floor, list_price, max_rounds, is_premium)
 
     def _new_session(self, agent_id: str, item_id: str, offer_cents: int,
-                     floor: int, list_price: int) -> dict[str, Any]:
+                     floor: int, list_price: int,
+                     max_rounds: int = MAX_ROUNDS,
+                     is_premium: bool = False) -> dict[str, Any]:
         session_id = f"neg-{uuid.uuid4().hex[:8]}"
         now = time.time()
 
@@ -77,17 +88,22 @@ class NegotiationEngine:
             vendor_floor_cents=floor,
             current_price_cents=counter if status == "counter" else offer_cents,
             rounds_used=1,
-            max_rounds=MAX_ROUNDS,
+            max_rounds=max_rounds,
             expires_at=now + SESSION_TTL,
             created_at=now,
         )
         self._store.create_negotiation(session)
 
-        return self._format_response(session_id, status, counter, offer_cents,
-                                     list_price, MAX_ROUNDS - 1)
+        resp = self._format_response(session_id, status, counter, offer_cents,
+                                     list_price, max_rounds - 1)
+        if is_premium:
+            resp["premium_agent"] = True
+        return resp
 
     def _continue_session(self, session_id: str, agent_id: str,
-                          offer_cents: int, floor: int, list_price: int) -> dict[str, Any]:
+                          offer_cents: int, floor: int, list_price: int,
+                          max_rounds: int = MAX_ROUNDS,
+                          is_premium: bool = False) -> dict[str, Any]:
         sess = self._store.get_negotiation(session_id)
         if not sess:
             return {"error": f"Session not found: {session_id}"}
@@ -104,7 +120,7 @@ class NegotiationEngine:
 
         rounds_used = sess["rounds_used"] + 1
         status, counter = self._decide(offer_cents, floor, list_price, rounds_used=rounds_used)
-        rounds_left = MAX_ROUNDS - rounds_used
+        rounds_left = sess["max_rounds"] - rounds_used
 
         self._store.update_negotiation(
             session_id,
@@ -114,8 +130,11 @@ class NegotiationEngine:
             rounds_used=rounds_used,
         )
 
-        return self._format_response(session_id, status, counter, offer_cents,
+        resp = self._format_response(session_id, status, counter, offer_cents,
                                      list_price, rounds_left)
+        if is_premium:
+            resp["premium_agent"] = True
+        return resp
 
     def _decide(self, offer: int, floor: int, list_price: int,
                 rounds_used: int) -> tuple[str, int]:

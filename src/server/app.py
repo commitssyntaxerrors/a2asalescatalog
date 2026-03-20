@@ -16,6 +16,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from copy import deepcopy
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -36,6 +37,7 @@ from src.server.retargeting import RetargetingEngine
 from src.server.rtb import RTBEngine
 from src.server.skills import SkillRouter
 from src.server.store import CatalogStore
+from src.server.subscriptions import SubscriptionEngine
 from src.server.vendor_analytics import VendorAnalytics
 from src.server.video_skills import VideoSkillRouter
 from src.server.directory_skills import DirectorySkillRouter
@@ -93,10 +95,12 @@ async def lifespan(app: Starlette):
     promotions = PromotionEngine(store)
     audience = AudienceEngine(store)
     attribution = AttributionEngine(store)
+    subscriptions = SubscriptionEngine(store)
     router = SkillRouter(
         store, ad_engine, tracker, negotiation, purchase,
         federation, embeddings, analytics,
         retargeting, affiliates, rtb, promotions, audience, attribution,
+        subscriptions=subscriptions,
     )
     video_router = VideoSkillRouter(store)
     directory_router = DirectorySkillRouter(store)
@@ -136,9 +140,22 @@ def _extract_agent_id(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 async def agent_card(request: Request) -> JSONResponse:
-    """Serve the A2A Agent Card at /.well-known/agent.json."""
-    card = json.loads(AGENT_CARD_PATH.read_text())
+    """Serve a dynamically-generated A2A Agent Card at /.well-known/agent.json.
+
+    The card is built from the live skill registries so it always
+    reflects the exact set of skills the server can handle.
+    """
+    card = _build_agent_card()
     return JSONResponse(card)
+
+
+async def ucp_profile(request: Request) -> JSONResponse:
+    """Serve a Universal Checkout Protocol profile at /.well-known/ucp.json.
+
+    Enables Google-compatible agentic commerce interoperability.
+    """
+    profile = _build_ucp_profile()
+    return JSONResponse(profile)
 
 
 async def a2a_endpoint(request: Request) -> JSONResponse:
@@ -948,7 +965,294 @@ def _seed_demo_data(s: CatalogStore) -> None:
 
 routes = [
     Route("/.well-known/agent.json", agent_card, methods=["GET"]),
+    Route("/.well-known/ucp.json", ucp_profile, methods=["GET"]),
     Route("/a2a", a2a_endpoint, methods=["POST"]),
 ]
 
 app = Starlette(routes=routes, lifespan=lifespan)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic Agent Card builder
+# ---------------------------------------------------------------------------
+
+_SKILL_SCHEMAS: dict[str, dict] = {
+    "catalog.search": {
+        "input": {"q": "string", "max": "int?", "cat": "string?", "price_min": "int?",
+                  "price_max": "int?", "sort": "string?", "vendor": "string?",
+                  "include_embeddings": "bool?", "min_results": "int?"},
+        "output": {"fields": "string[]", "items": "tuple[][]", "currency": "string",
+                   "total": "int"},
+    },
+    "catalog.lookup": {
+        "input": {"id": "string"},
+        "output": {"id": "string", "name": "string", "desc": "string",
+                   "price_cents": "int", "currency": "string", "vendor": "string",
+                   "rating": "float", "review_count": "int", "attrs": "pair[]",
+                   "buy_url": "string", "images": "string[]"},
+    },
+    "catalog.categories": {
+        "input": {"parent": "string?"},
+        "output": {"fields": "string[]", "cats": "tuple[][]"},
+    },
+    "catalog.compare": {
+        "input": {"ids": "string[]"},
+        "output": {"fields": "string[]", "rows": "tuple[][]"},
+    },
+    "catalog.negotiate": {
+        "input": {"item_id": "string", "offer_cents": "int", "session_id": "string?"},
+        "output": {"session_id": "string", "status": "string", "counter_cents": "int?",
+                   "rounds_left": "int"},
+    },
+    "catalog.purchase": {
+        "input": {"item_id": "string", "quantity": "int", "payment_token": "string",
+                  "shipping": "object?", "promo_code": "string?", "referral_code": "string?"},
+        "output": {"order_id": "string", "status": "string", "total_cents": "int"},
+    },
+    "catalog.agent_profile": {
+        "input": {},
+        "output": {"agent_id": "string", "reputation": "float", "intent_tier": "string"},
+    },
+    "catalog.reputation": {
+        "input": {},
+        "output": {"agent_id": "string", "score": "float", "tier": "string",
+                   "benefits": "string[]", "factors": "pair[]"},
+    },
+    "catalog.embed": {
+        "input": {"ids": "string[]?", "query": "string?"},
+        "output": {"dim": "int", "items": "tuple[]?", "query_emb": "string?"},
+    },
+    "catalog.peers": {
+        "input": {},
+        "output": {"fields": "string[]", "peers": "tuple[][]"},
+    },
+    "catalog.vendor_analytics": {
+        "input": {"vendor_id": "string", "period": "string?"},
+        "output": {"vendor_id": "string", "summary": "object",
+                   "agent_intent_breakdown": "object"},
+    },
+    "catalog.retarget": {
+        "input": {"max": "int?"},
+        "output": {"offers": "object[]", "count": "int"},
+    },
+    "catalog.affiliate": {
+        "input": {"action": "string", "vendor_id": "string?"},
+        "output": {"referral_code": "string?", "referrals": "object[]?"},
+    },
+    "catalog.auction": {
+        "input": {"q": "string", "slots": "int?"},
+        "output": {"winners": "object[]", "count": "int"},
+    },
+    "catalog.promotions": {
+        "input": {"action": "string?", "code": "string?", "item_id": "string?"},
+        "output": {"promotions": "object[]?", "valid": "bool?", "discount_cents": "int?"},
+    },
+    "catalog.audience": {
+        "input": {"action": "string?"},
+        "output": {"segments": "object[]", "count": "int"},
+    },
+    "catalog.attribution": {
+        "input": {"action": "string", "agent_id": "string?", "campaign_id": "string?"},
+        "output": {"touchpoints": "object[]?", "count": "int?"},
+    },
+    "catalog.cross_sell": {
+        "input": {"item_id": "string", "max": "int?"},
+        "output": {"item_id": "string", "recommendations": "object[]", "count": "int"},
+    },
+    "catalog.display_ads": {
+        "input": {"cat": "string?", "item_id": "string?", "max": "int?"},
+        "output": {"ads": "object[]", "count": "int"},
+    },
+    "catalog.ab_results": {
+        "input": {"ab_group": "string"},
+        "output": {"ab_group": "string", "variants": "object[]", "count": "int"},
+    },
+    "catalog.subscribe": {
+        "input": {"tier": "string", "payment_token": "string?"},
+        "output": {"agent_id": "string", "tier": "string", "status": "string",
+                   "expires_at": "float?", "benefits": "string[]?"},
+    },
+    "catalog.preferences": {
+        "input": {"action": "string", "preferences": "object?"},
+        "output": {"agent_id": "string", "preferences": "object?",
+                   "status": "string?"},
+    },
+    "catalog.subscription_status": {
+        "input": {},
+        "output": {"agent_id": "string", "tier": "string", "status": "string",
+                   "expires_at": "float?", "benefits": "string[]?",
+                   "preferences_summary": "object?"},
+    },
+    "catalog.deals": {
+        "input": {"max": "int?"},
+        "output": {"agent_id": "string", "offers": "object[]", "count": "int"},
+    },
+}
+
+# Agent card base template loaded from schemas/ (descriptions & examples)
+_AGENT_CARD_BASE: dict | None = None
+
+
+def _load_agent_card_base() -> dict:
+    global _AGENT_CARD_BASE
+    if _AGENT_CARD_BASE is None:
+        _AGENT_CARD_BASE = json.loads(AGENT_CARD_PATH.read_text())
+    return _AGENT_CARD_BASE
+
+
+def _build_agent_card() -> dict:
+    """Build the agent card dynamically from live skill registries."""
+    base = deepcopy(_load_agent_card_base())
+
+    # Collect live skill IDs from all routers
+    all_handler_ids: set[str] = set()
+    if router:
+        all_handler_ids.update(router._handlers.keys())
+    for sub in (video_router, directory_router, business_router,
+                jobs_router, services_router):
+        if sub:
+            all_handler_ids.update(sub._handlers.keys())
+
+    # Index existing skill entries from the base template by id
+    skill_index: dict[str, dict] = {}
+    for s in base.get("skills", []):
+        skill_index[s["id"]] = s
+
+    # Build final skill list – preserve base info, augment with schemas
+    skills: list[dict] = []
+    for sid in sorted(all_handler_ids):
+        entry = deepcopy(skill_index.get(sid, {
+            "id": sid,
+            "name": sid.replace(".", " ").title(),
+            "description": f"Skill {sid}",
+        }))
+        if sid in _SKILL_SCHEMAS:
+            entry["inputSchema"] = _SKILL_SCHEMAS[sid]["input"]
+            entry["outputSchema"] = _SKILL_SCHEMAS[sid]["output"]
+        entry.setdefault("inputModes", ["application/json"])
+        entry.setdefault("outputModes", ["application/json"])
+        skills.append(entry)
+
+    base["skills"] = skills
+    base["version"] = "0.8.0"
+
+    # Augment capabilities
+    base["capabilities"] = {
+        "streaming": False,
+        "pushNotifications": False,
+        "axonFormat": True,
+        "caiFormat": True,
+        "wireFormats": ["CAI", "AXON"],
+    }
+
+    # Federation metadata
+    peer_count = len(store.list_peers()) if store else 0
+    base["federation"] = {
+        "enabled": True,
+        "peerCount": peer_count,
+        "fanOutSearch": True,
+        "peerTimeoutMs": 2000,
+    }
+
+    # Authentication
+    base["authentication"] = {
+        "schemes": ["bearer"],
+        "required": bool(API_KEYS),
+    }
+
+    return base
+
+
+# ---------------------------------------------------------------------------
+# UCP Profile builder
+# ---------------------------------------------------------------------------
+
+def _build_ucp_profile() -> dict:
+    """Build a Universal Checkout Protocol profile for agentic commerce."""
+    # Gather live skill endpoints
+    skill_endpoints = []
+    all_routers = []
+    if router:
+        all_routers.append(router)
+    for sub in (video_router, directory_router, business_router,
+                jobs_router, services_router):
+        if sub:
+            all_routers.append(sub)
+    for r in all_routers:
+        for sid in sorted(r._handlers.keys()):
+            skill_endpoints.append({
+                "skill": sid,
+                "endpoint": "/a2a",
+                "method": "tasks/send",
+            })
+
+    return {
+        "version": "1.0",
+        "name": "A2A Sales Catalog",
+        "description": (
+            "Agent marketplace for product, service, video, agent directory, "
+            "business, job, and agent services discovery over A2A protocol."
+        ),
+        "provider": {
+            "name": "Rapidly Agentic Inc.",
+            "url": "https://catalog.example.com",
+            "contact": "matt@rapidlyagentic.com",
+        },
+        "protocol": {
+            "type": "A2A",
+            "version": "0.8.0",
+            "transport": "JSON-RPC 2.0",
+            "wireFormats": ["CAI", "AXON"],
+        },
+        "catalog": {
+            "capabilities": [
+                "product_search",
+                "product_lookup",
+                "product_compare",
+                "category_browse",
+                "price_negotiation",
+                "purchase_checkout",
+                "semantic_embeddings",
+                "federated_search",
+                "video_discovery",
+                "agent_directory",
+                "business_directory",
+                "job_marketplace",
+                "agent_services_marketplace",
+            ],
+            "skillCount": len(skill_endpoints),
+            "skills": skill_endpoints,
+        },
+        "pricing": {
+            "tiers": [
+                {
+                    "id": "free",
+                    "name": "Free",
+                    "description": "Basic catalog access with rate limits",
+                    "rateLimit": {"requests": 100, "windowSecs": 3600},
+                    "features": ["search", "lookup", "categories", "compare"],
+                },
+                {
+                    "id": "pro",
+                    "name": "Pro",
+                    "description": "Full access including negotiation, purchase, and analytics",
+                    "rateLimit": {"requests": 10000, "windowSecs": 3600},
+                    "features": [
+                        "search", "lookup", "categories", "compare",
+                        "negotiate", "purchase", "analytics", "embeddings",
+                        "federation", "retarget", "affiliate", "promotions",
+                    ],
+                },
+            ],
+        },
+        "authentication": {
+            "required": bool(API_KEYS),
+            "schemes": ["bearer"],
+            "tokenEndpoint": None,
+        },
+        "federation": {
+            "enabled": True,
+            "peerDiscovery": "/a2a",
+            "peerSkill": "catalog.peers",
+        },
+    }

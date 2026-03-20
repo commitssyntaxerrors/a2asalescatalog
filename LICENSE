@@ -146,6 +146,18 @@ Agent Services Marketplace:
 - Service provider analytics with transaction counts, response time
   tracking, and uptime guarantees for AI agent commerce
 
+Interoperability & Federation:
+- Universal Checkout Protocol (UCP) profile publishing at
+  /.well-known/ucp.json for Google-compatible agentic commerce
+  interoperability with catalog capabilities and pricing tiers
+- Dynamic A2A Agent Card generation from live skill registries with
+  input/output schemas, federation metadata, authentication requirements,
+  and dual wire format (CAI + AXON) capability advertisement
+- Federated peer catalog fan-out search with parallel HTTP dispatch,
+  result merging, deduplication by item ID, re-ranking by relevance
+  score, source attribution (local vs peer origin), peer health checking,
+  configurable per-peer timeout handling, and min_results threshold
+
 First published: March 19, 2026 (v0.1.0).
 Revised: March 19, 2026 (v0.2.0) — added agent tracking, reputation,
   negotiation, purchase, federation, embeddings, vendor analytics,
@@ -166,6 +178,17 @@ Revised: March 19, 2026 (v0.6.0) — added agent service directory for A2A
 Revised: March 19, 2026 (v0.7.0) — added agent services marketplace where
   autonomous agents list services for sale with pricing, SLA guarantees,
   reviews, and transaction tracking.
+Revised: March 20, 2026 (v0.8.0) — added Universal Checkout Protocol (UCP)
+  profile endpoint at /.well-known/ucp.json for Google-compatible agentic
+  commerce interoperability with catalog capabilities, skill endpoints, and
+  pricing tier information; enhanced A2A Agent Card with full spec compliance
+  including dynamic generation from live skill registries, input/output
+  schemas per skill, federation metadata, authentication requirements, and
+  dual wire format (CAI + AXON) capability flags; implemented federated
+  peer catalog fan-out search with parallel HTTP dispatch to registered
+  peers, result merging, deduplication by item ID, re-ranking by relevance,
+  source attribution (local vs peer), peer health checking, configurable
+  timeout handling, and min_results threshold for triggering fan-out.
 
 CONTACT
 -------
