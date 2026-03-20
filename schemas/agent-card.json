@@ -1,8 +1,8 @@
 {
   "name": "A2A Sales Catalog",
-  "description": "Agent marketplace for product and service discovery. Query products, compare items, negotiate prices, complete purchases, browse categories — all over A2A with compact tuple responses.",
+  "description": "Agent marketplace for product and service discovery. Full advertising platform with search ads, display ads, retargeting, RTB auctions, promotions, affiliate programs, audience segments, attribution, and cross-sell — all over A2A.",
   "url": "https://catalog.example.com",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "capabilities": {
     "streaming": false,
     "pushNotifications": false
@@ -11,21 +11,16 @@
     {
       "id": "catalog.search",
       "name": "Search Catalog",
-      "description": "Search for products or services by query, with optional category, price, and vendor filters. Returns compact tuple arrays.",
-      "examples": [
-        "Find wireless earbuds under $50",
-        "Search for standing desks sorted by rating"
-      ],
+      "description": "Search for products or services by query, with optional filters. Includes intent-aware sponsored results with frequency capping and dayparting.",
+      "examples": ["Find wireless earbuds under $50", "Search for standing desks sorted by rating"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     },
     {
       "id": "catalog.lookup",
       "name": "Lookup Item",
-      "description": "Get full details for a specific catalog item by its ID.",
-      "examples": [
-        "Get details for item WE-001"
-      ],
+      "description": "Get full details for a specific catalog item. Includes cross-sell recommendations, display ads, and active promotions.",
+      "examples": ["Get details for item WE-001"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     },
@@ -40,29 +35,23 @@
       "id": "catalog.compare",
       "name": "Compare Items",
       "description": "Compare two or more catalog items side by side. Returns a table of fields and rows.",
-      "examples": [
-        "Compare WE-001, WE-002, and WE-003"
-      ],
+      "examples": ["Compare WE-001, WE-002, and WE-003"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     },
     {
       "id": "catalog.negotiate",
       "name": "Negotiate Price",
-      "description": "Submit a price offer for an item. Supports multi-round negotiation with counter-offers. Requires authentication and reputation >= 40.",
-      "examples": [
-        "Offer $42 for item WE-001"
-      ],
+      "description": "Submit a price offer for an item. Supports multi-round negotiation with counter-offers.",
+      "examples": ["Offer $42 for item WE-001"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     },
     {
       "id": "catalog.purchase",
       "name": "Purchase Item",
-      "description": "Complete a purchase using a tokenized payment method. Optionally reference a negotiation session for the agreed price.",
-      "examples": [
-        "Buy item WE-001 with payment token"
-      ],
+      "description": "Complete a purchase with tokenized payment. Supports promo codes and affiliate referral codes. Triggers conversion attribution.",
+      "examples": ["Buy item WE-001 with payment token and promo code SOUND10"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     },
@@ -83,25 +72,94 @@
     {
       "id": "catalog.embed",
       "name": "Semantic Embeddings",
-      "description": "Get semantic embedding vectors for items or a free-text query. Useful for local re-ranking, clustering, or recommendation.",
-      "examples": [
-        "Get embeddings for WE-001 and WE-002",
-        "Embed the query 'comfortable earbuds for running'"
-      ],
+      "description": "Get semantic embedding vectors for items or a free-text query.",
+      "examples": ["Get embeddings for WE-001 and WE-002"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     },
     {
       "id": "catalog.peers",
       "name": "Federation Peers",
-      "description": "List federated catalog peers in the network. Each peer serves specific categories.",
+      "description": "List federated catalog peers in the network.",
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     },
     {
       "id": "catalog.vendor_analytics",
       "name": "Vendor Analytics",
-      "description": "Get agent behavior analytics for a vendor's products. Includes impressions, intent breakdown, top queries, and conversion metrics.",
+      "description": "Get agent behavior analytics for a vendor's products including intent breakdown and conversion metrics.",
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.retarget",
+      "name": "Retargeting Offers",
+      "description": "Get personalized retargeting offers for items you viewed but didn't purchase, with time-decayed discounts.",
+      "examples": ["Show me retargeting offers"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.affiliate",
+      "name": "Affiliate Program",
+      "description": "Create referral codes and track affiliate commissions. Agents earn commission for referring purchases.",
+      "examples": ["Create a referral code for vendor v-soundpod", "Check my affiliate earnings"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.auction",
+      "name": "RTB Auction",
+      "description": "Run a real-time bidding auction for ad placement slots. Multiple advertisers compete per-request.",
+      "examples": ["Run auction for earbuds query with 2 slots"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.promotions",
+      "name": "Promotions & Deals",
+      "description": "Discover active coupons, flash sales, and bundle deals. Validate promo codes before purchase.",
+      "examples": ["Find promotions for item WE-001", "Validate promo code SOUND10"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.audience",
+      "name": "Audience Segments",
+      "description": "Classify agents into behavioral segments (bargain hunters, premium buyers, etc.) for targeted advertising.",
+      "examples": ["Classify my agent into segments", "List all audience segments"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.attribution",
+      "name": "Conversion Attribution",
+      "description": "Track multi-touch conversion attribution. See which ad touchpoints drove purchases (first-touch and last-touch).",
+      "examples": ["Get attribution for campaign ad-001", "Show my purchase journey for item WE-001"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.cross_sell",
+      "name": "Cross-Sell Recommendations",
+      "description": "Get cross-sell and upsell product recommendations for an item. Includes paid vendor recommendations.",
+      "examples": ["Get cross-sell recommendations for WE-001"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.display_ads",
+      "name": "Display Ads",
+      "description": "Get structured display/banner ad placements for a category or item context. Respects frequency capping and dayparting.",
+      "examples": ["Get display ads for audio category"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "catalog.ab_results",
+      "name": "A/B Test Results",
+      "description": "Get aggregated A/B test results for ad creative variants. Includes impressions, clicks, conversions, CTR, and CVR per variant.",
+      "examples": ["Get A/B test results for group 'headline-test'"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"]
     }

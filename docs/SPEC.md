@@ -1,6 +1,6 @@
 # A2A Sales Catalog — Specification Sheet
 
-**Version:** 0.1.0-draft
+**Version:** 0.3.0-draft
 **Date:** 2026-03-19
 **Status:** Draft
 
@@ -703,7 +703,333 @@ Vendors get analytics on **agent behavior** — not human behavior. This is a ne
 
 ---
 
-## 14. Architecture Overview
+## 14. Display & Banner Ads
+
+### 14.1 Overview
+
+Beyond search-result sponsorship, vendors can purchase **display ad placements** that appear in non-search contexts (item detail pages, category browsing, promotional slots). Display ads carry structured creative data (headline, body, image URL) that consumer agents can render in any format.
+
+### 14.2 Placement Logic
+
+1. The catalog maintains ad campaigns with `promo_headline`, `promo_body`, and `promo_image_url` fields.
+2. When a consumer agent calls `catalog.display_ads`, the engine filters active campaigns by optional `category` or `item_id` context.
+3. Results are ordered by bid amount (descending) and respect frequency capping and dayparting rules.
+4. Each returned ad includes a `campaign_id`, creative data, and the sponsoring vendor.
+
+### 14.3 Request / Response
+
+```json
+// Request
+{"skill": "catalog.display_ads", "category": "audio", "max": 3}
+
+// Response
+{"ads": [{"campaign_id": "ad-001", "headline": "...", "body": "...", "image_url": "...", "vendor_id": "v-001", "item_id": "WE-001"}]}
+```
+
+---
+
+## 15. Retargeting & Remarketing
+
+### 15.1 Overview
+
+Agents that viewed items but did not purchase receive **personalized retargeting offers** with time-decayed discounts, increasing urgency as time passes.
+
+### 15.2 Discount Tiers
+
+| Time Since View | Discount |
+|---|---|
+| < 1 day | 5% |
+| 1–3 days | 10% |
+| 3–7 days | 15% |
+| > 7 days | No offer (expired) |
+
+### 15.3 How It Works
+
+1. The Agent Tracker records every `view` event with timestamps.
+2. When `catalog.retarget` is invoked, the engine checks all viewed-but-not-purchased items.
+3. Offers are generated with the appropriate discount tier, expiry timestamp, and a unique offer code.
+
+### 15.4 Request / Response
+
+```json
+// Request
+{"skill": "catalog.retarget", "agent_id": "agent-001"}
+
+// Response
+{"offers": [{"item_id": "WE-001", "discount_pct": 10, "expires": "2026-03-22T00:00:00Z", "offer_code": "rt-abc123"}]}
+```
+
+---
+
+## 16. Affiliate & Referral Program
+
+### 16.1 Overview
+
+Consumer agents can **earn commission** by referring other agents to purchase items. Each referral generates a unique tracking code; when a referred agent purchases, the referring agent earns a percentage of the sale.
+
+### 16.2 Commission Structure
+
+- Default commission: **5%** (500 basis points)
+- Per-vendor overrides supported via `commission_bps` field
+- Commissions tracked per referral code with running totals
+
+### 16.3 Workflow
+
+1. Agent calls `catalog.affiliate` with `action: "create"` and `vendor_id`
+2. Server generates a unique referral code (`ref-xxxx`)
+3. Referring agent shares the code
+4. At purchase time, buyer includes `referral_code` in the request
+5. Commission is recorded and credited to the referring agent
+
+### 16.4 Request / Response
+
+```json
+// Create referral
+{"skill": "catalog.affiliate", "action": "create", "agent_id": "agent-001", "vendor_id": "v-001"}
+// Response
+{"referral_code": "ref-abc123", "commission_bps": 500}
+
+// Check status
+{"skill": "catalog.affiliate", "action": "status", "agent_id": "agent-001"}
+// Response
+{"links": [{"vendor_id": "v-001", "code": "ref-abc123", "total_earned_cents": 250}]}
+```
+
+---
+
+## 17. Real-Time Bidding (RTB)
+
+### 17.1 Overview
+
+For high-value placement slots, multiple advertisers compete in a **per-request real-time auction**. The highest bidders win impression slots, subject to frequency capping and budget constraints.
+
+### 17.2 Auction Flow
+
+1. Consumer agent calls `catalog.auction` with a keyword/category and desired number of slots
+2. Engine collects all matching campaigns with remaining budget
+3. Campaigns are filtered by frequency caps and schedule constraints
+4. Intent-tiered bid adjustments are applied based on the requesting agent's intent tier
+5. Winners are ranked by effective bid price; top N win the slots
+6. Each winner's budget is decremented by their bid amount
+
+### 17.3 Request / Response
+
+```json
+// Request
+{"skill": "catalog.auction", "keyword": "earbuds", "slots": 2, "agent_id": "agent-001"}
+
+// Response
+{"winners": [{"campaign_id": "ad-001", "bid_cents": 150, "item_id": "WE-001"}, {"campaign_id": "ad-002", "bid_cents": 120, "item_id": "WE-002"}]}
+```
+
+---
+
+## 18. Frequency Capping
+
+### 18.1 Overview
+
+To prevent ad fatigue and ensure a healthy agent experience, each campaign can set a **maximum number of impressions** per agent within a rolling time window.
+
+### 18.2 Configuration
+
+| Field | Description | Default |
+|---|---|---|
+| `freq_cap_count` | Max impressions per window | 10 |
+| `freq_cap_window_secs` | Rolling window in seconds | 3600 (1 hr) |
+
+### 18.3 Enforcement
+
+- Before serving an ad, the engine queries the `frequency_records` table for the agent+campaign pair.
+- If impressions within the window >= `freq_cap_count`, the campaign is suppressed for that agent.
+- Frequency caps apply to search ads, display ads, and RTB auctions uniformly.
+
+---
+
+## 19. A/B Testing for Ad Creatives
+
+### 19.1 Overview
+
+Campaigns can define multiple **creative variants** (A/B groups) to test headlines, copy, images, or CTAs. The engine distributes impressions across variants and tracks performance metrics.
+
+### 19.2 Event Tracking
+
+Every ad interaction logs an event with the `ab_group` tag:
+- **impression**: The ad was served to an agent
+- **click**: The agent followed up on the ad (visited the item)
+- **conversion**: The agent purchased the advertised item
+
+### 19.3 Results Aggregation
+
+The `catalog.ab_results` skill returns per-variant aggregates:
+
+```json
+{"results": [
+  {"variant": "A", "impressions": 500, "clicks": 50, "conversions": 10, "ctr": 0.10, "cvr": 0.02},
+  {"variant": "B", "impressions": 480, "clicks": 72, "conversions": 15, "ctr": 0.15, "cvr": 0.03}
+]}
+```
+
+---
+
+## 20. Audience Segments & Lookalike Targeting
+
+### 20.1 Overview
+
+Agents are classified into **behavioral segments** based on their interaction patterns. Vendors can target campaigns to specific segments for higher relevance.
+
+### 20.2 Default Segments
+
+| Segment | ID | Criteria |
+|---|---|---|
+| Bargain Hunters | seg-bargain | High search volume, low conversion, price-sensitive |
+| Premium Buyers | seg-premium | High purchase volume, low price sensitivity |
+| Researchers | seg-research | Many views and comparisons, few purchases |
+| Impulse Buyers | seg-impulse | Quick purchase after first search |
+| Loyal Repeat Buyers | seg-loyal | Multiple purchases from same vendors |
+
+### 20.3 Classification
+
+The `catalog.audience` skill with `action: "classify"` analyzes an agent's event history and assigns/updates segment memberships. Vendors can then use `target_segments` on campaigns to limit delivery to specific segments.
+
+---
+
+## 21. Conversion Attribution
+
+### 21.1 Overview
+
+Multi-touch **conversion attribution** tracks every ad touchpoint an agent interacted with before making a purchase. This allows vendors to understand which campaigns and channels drove conversions.
+
+### 21.2 Attribution Models
+
+| Model | Description |
+|---|---|
+| **First Touch** | 100% credit to the first ad the agent interacted with |
+| **Last Touch** | 100% credit to the last ad before purchase |
+
+### 21.3 Touchpoint Tracking
+
+Every time a sponsored result is served, a touchpoint is recorded:
+- `agent_id`, `campaign_id`, `item_id`, `touch_type` (impression, click, view), `timestamp`
+
+When a purchase occurs, the engine runs attribution and stores results:
+- `first_touch_campaign_id`, `last_touch_campaign_id`, `agent_id`, `item_id`, `order_id`
+
+### 21.4 Request / Response
+
+```json
+// Campaign attribution
+{"skill": "catalog.attribution", "action": "campaign", "campaign_id": "ad-001"}
+// Response
+{"campaign_id": "ad-001", "first_touch_count": 12, "last_touch_count": 8}
+
+// Agent journey
+{"skill": "catalog.attribution", "action": "journey", "agent_id": "agent-001", "item_id": "WE-001"}
+// Response
+{"touchpoints": [{"campaign_id": "ad-001", "touch_type": "impression", "ts": 1710800000}, ...]}
+```
+
+---
+
+## 22. Promotional Campaigns (Coupons, Flash Sales, Bundles)
+
+### 22.1 Overview
+
+Vendors create **promotional campaigns** — coupons, flash sales, and bundle deals — with configurable discount types, usage limits, minimum purchase amounts, and expiry dates.
+
+### 22.2 Promotion Types
+
+| Type | Description |
+|---|---|
+| `coupon` | A reusable code for a percentage or fixed discount |
+| `flash_sale` | Time-limited deep discount |
+| `bundle` | Discount when purchasing multiple qualifying items |
+
+### 22.3 Discount Types
+
+| Discount Type | Description |
+|---|---|
+| `percent` | Percentage off (e.g., 10% off) |
+| `fixed_cents` | Fixed amount off in cents (e.g., 500 = $5 off) |
+
+### 22.4 Workflow
+
+1. Agent calls `catalog.promotions` with `action: "discover"` to list active promos
+2. Agent validates a code with `action: "validate"` before purchase
+3. At purchase time, agent includes `promo_code` in the request; server verifies and applies discount
+4. Promo usage counter increments; once `max_uses` is reached, the code expires
+
+---
+
+## 23. Cross-Sell & Upsell Recommendations
+
+### 23.1 Overview
+
+Vendors define **cross-sell and upsell rules** that recommend complementary or upgraded products when an agent views or purchases a specific item.
+
+### 23.2 Rule Types
+
+| Type | Description |
+|---|---|
+| `cross_sell` | Recommend a complementary product (e.g., earbuds → case) |
+| `upsell` | Recommend a premium alternative (e.g., basic → pro model) |
+| `bundle` | Recommend items frequently bought together |
+
+### 23.3 Request / Response
+
+```json
+// Request
+{"skill": "catalog.cross_sell", "item_id": "WE-001"}
+
+// Response
+{"recommendations": [{"item_id": "WE-003", "rule_type": "upsell", "reason": "Premium model with noise cancellation"}]}
+```
+
+---
+
+## 24. Creative Rotation
+
+### 24.1 Overview
+
+Campaigns with multiple creative assets (headlines, images, CTAs) use **weighted round-robin rotation** to distribute impressions across variants.
+
+### 24.2 Configuration
+
+- `creatives`: JSON array of creative objects, each with `headline`, `body`, `image_url`
+- `creative_weights`: JSON array of numeric weights corresponding to each creative
+
+### 24.3 Selection Algorithm
+
+The engine tracks a rotation index per campaign and selects creatives according to their weights. This ensures higher-weighted creatives receive proportionally more impressions while still exposing all variants.
+
+---
+
+## 25. Campaign Scheduling & Dayparting
+
+### 25.1 Overview
+
+Campaigns can be restricted to specific **date ranges** and **time-of-day windows** (dayparting), allowing vendors to run promotions during peak hours or limited-time events.
+
+### 25.2 Configuration
+
+| Field | Description | Example |
+|---|---|---|
+| `schedule_start` | Campaign start date (ISO 8601) | `2026-03-01T00:00:00Z` |
+| `schedule_end` | Campaign end date (ISO 8601) | `2026-03-31T23:59:59Z` |
+| `schedule_hours` | JSON array of active hours (0–23) | `[9, 10, 11, 12, 13, 14, 15, 16, 17]` |
+| `schedule_days` | JSON array of active weekdays (0=Mon–6=Sun) | `[0, 1, 2, 3, 4]` |
+
+### 25.3 Enforcement
+
+Before serving any ad, the engine checks:
+1. Is the current UTC time between `schedule_start` and `schedule_end`?
+2. Is the current hour in `schedule_hours`?
+3. Is the current weekday in `schedule_days`?
+
+If any check fails, the campaign is skipped.
+
+---
+
+## 26. Architecture Overview
 
 ```
 ┌─────────────────┐         A2A/JSON-RPC          ┌──────────────────────┐
@@ -726,26 +1052,32 @@ Vendors get analytics on **agent behavior** — not human behavior. This is a ne
                                                    └──────────────────────┘
 ```
 
-### 14.1 Components
+### 26.1 Components
 
 | Component | Tech | Purpose |
 |---|---|---|
 | **A2A Server** | Python (FastAPI / Starlette) | Handles A2A protocol, routes skills |
 | **Search Index** | SQLite FTS5 → Meilisearch | Full-text + faceted product search |
-| **Ad Engine** | In-process module | Keyword bidding, intent-tiered insertion, attribution |
+| **Ad Engine** | In-process module | Keyword bidding, intent-tiered insertion, display ads, cross-sell, dayparting, creative rotation |
 | **Agent Tracker** | In-process module | Visit logging, interest scoring, intent classification |
 | **Negotiation Engine** | In-process module | Offer/counter-offer, vendor floor pricing |
 | **Purchase Handler** | In-process module | Order creation, payment token validation |
 | **Federation Router** | In-process module | Peer discovery, cross-catalog fan-out |
 | **Embedding Index** | NumPy / FAISS (future) | Semantic vectors for items and queries |
 | **Vendor Analytics** | In-process module | Agent behavior analytics per vendor |
+| **Retargeting Engine** | In-process module | Time-decayed remarketing offers |
+| **Affiliate Engine** | In-process module | Referral code generation, commission tracking |
+| **RTB Engine** | In-process module | Real-time bidding auctions with freq cap integration |
+| **Promotion Engine** | In-process module | Coupons, flash sales, bundle deals, promo code validation |
+| **Audience Engine** | In-process module | Behavioral segment classification and lookalike targeting |
+| **Attribution Engine** | In-process module | Multi-touch conversion attribution (first/last touch) |
 | **Auth & Rate Limit** | API key + token bucket | Tiered access control |
 | **Vendor Portal** | Separate web app (future) | Product upload, ad campaign management |
 | **Data Store** | PostgreSQL | Canonical product + vendor + ad data |
 
 ---
 
-## 15. Security & Trust
+## 27. Security & Trust
 
 | Concern | Mitigation |
 |---|---|
@@ -762,7 +1094,7 @@ Vendors get analytics on **agent behavior** — not human behavior. This is a ne
 
 ---
 
-## 16. Data Model (Core Entities)
+## 28. Data Model (Core Entities)
 
 ### Items
 | Field | Type | Notes |
@@ -875,7 +1207,7 @@ Vendors get analytics on **agent behavior** — not human behavior. This is a ne
 
 ---
 
-## 17. Milestones
+## 29. Milestones
 
 | Phase | Deliverable | Target |
 |---|---|---|
@@ -892,7 +1224,7 @@ Vendors get analytics on **agent behavior** — not human behavior. This is a ne
 
 ---
 
-## 18. Open Questions
+## 30. Open Questions
 
 - [ ] Should we support streaming (SSE) for large result sets or keep it simple request/response?
 - [ ] Multi-currency support — convert at query time or store per-vendor?

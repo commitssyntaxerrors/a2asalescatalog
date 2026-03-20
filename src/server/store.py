@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from src.common.models import (
-    AdCampaign, AgentEvent, AgentInterest, AgentProfile,
-    CatalogItem, Category, NegotiationSession, Order, Vendor,
+    AdCampaign, AffiliateLink, AgentEvent, AgentInterest, AgentProfile,
+    AgentSegment, AgentSegmentMembership, CatalogItem, Category,
+    ConversionAttribution, CrossSellRule, FrequencyRecord,
+    NegotiationSession, Order, Promotion, TouchPoint, Vendor,
     classify_intent,
 )
 
@@ -165,6 +167,104 @@ class CatalogStore:
                 status TEXT DEFAULT 'online',
                 last_seen_at REAL
             );
+
+            CREATE TABLE IF NOT EXISTS affiliate_links (
+                referral_code TEXT PRIMARY KEY,
+                referring_agent_id TEXT NOT NULL,
+                vendor_id TEXT NOT NULL,
+                commission_bps INTEGER DEFAULT 500,
+                total_referrals INTEGER DEFAULT 0,
+                total_earned_cents INTEGER DEFAULT 0,
+                active INTEGER DEFAULT 1,
+                created_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_aff_agent ON affiliate_links(referring_agent_id);
+
+            CREATE TABLE IF NOT EXISTS frequency_records (
+                agent_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                impressions INTEGER DEFAULT 0,
+                window_start REAL,
+                PRIMARY KEY (agent_id, campaign_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS ab_test_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ab_group TEXT NOT NULL,
+                variant TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                campaign_id TEXT,
+                revenue_cents INTEGER DEFAULT 0,
+                timestamp REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_segments (
+                segment_id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                criteria TEXT DEFAULT '{}',
+                agent_count INTEGER DEFAULT 0,
+                created_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_segment_memberships (
+                agent_id TEXT NOT NULL,
+                segment_id TEXT NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                assigned_at REAL,
+                PRIMARY KEY (agent_id, segment_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS touchpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                campaign_id TEXT DEFAULT '',
+                item_id TEXT DEFAULT '',
+                timestamp REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_tp_agent ON touchpoints(agent_id);
+
+            CREATE TABLE IF NOT EXISTS conversion_attributions (
+                order_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                touchpoints INTEGER DEFAULT 0,
+                first_touch_campaign TEXT DEFAULT '',
+                last_touch_campaign TEXT DEFAULT '',
+                attributed_revenue_cents INTEGER DEFAULT 0,
+                created_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS promotions (
+                promo_id TEXT PRIMARY KEY,
+                vendor_id TEXT NOT NULL,
+                item_id TEXT DEFAULT '',
+                code TEXT DEFAULT '',
+                discount_type TEXT DEFAULT 'percent',
+                discount_value INTEGER DEFAULT 0,
+                min_price_cents INTEGER DEFAULT 0,
+                max_uses INTEGER DEFAULT 0,
+                used_count INTEGER DEFAULT 0,
+                starts_at REAL DEFAULT 0,
+                expires_at REAL DEFAULT 0,
+                active INTEGER DEFAULT 1,
+                bundle_item_ids TEXT DEFAULT '[]',
+                promo_type TEXT DEFAULT 'coupon'
+            );
+            CREATE INDEX IF NOT EXISTS idx_promo_vendor ON promotions(vendor_id);
+            CREATE INDEX IF NOT EXISTS idx_promo_code ON promotions(code);
+
+            CREATE TABLE IF NOT EXISTS cross_sell_rules (
+                source_item_id TEXT NOT NULL,
+                target_item_id TEXT NOT NULL,
+                relation_type TEXT DEFAULT 'cross_sell',
+                vendor_id TEXT DEFAULT '',
+                bid_cents INTEGER DEFAULT 0,
+                priority INTEGER DEFAULT 0,
+                PRIMARY KEY (source_item_id, target_item_id)
+            );
         """)
         c.commit()
 
@@ -230,6 +330,12 @@ class CatalogStore:
             ),
         )
         self._conn.commit()
+
+    def get_all_active_campaigns(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM ad_campaigns WHERE active = 1"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Read ops
@@ -523,6 +629,289 @@ class CatalogStore:
 
     def list_peers(self) -> list[dict[str, Any]]:
         rows = self._conn.execute("SELECT * FROM federation_peers").fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Affiliate links
+    # ------------------------------------------------------------------
+
+    def upsert_affiliate(self, link: AffiliateLink) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO affiliate_links
+               (referral_code, referring_agent_id, vendor_id, commission_bps,
+                total_referrals, total_earned_cents, active, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (link.referral_code, link.referring_agent_id, link.vendor_id,
+             link.commission_bps, link.total_referrals, link.total_earned_cents,
+             int(link.active), link.created_at),
+        )
+        self._conn.commit()
+
+    def get_affiliate(self, referral_code: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM affiliate_links WHERE referral_code = ?", (referral_code,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_agent_affiliates(self, agent_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM affiliate_links WHERE referring_agent_id = ? AND active = 1",
+            (agent_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_affiliate_referral(self, referral_code: str, earned_cents: int) -> None:
+        self._conn.execute(
+            "UPDATE affiliate_links SET total_referrals = total_referrals + 1, "
+            "total_earned_cents = total_earned_cents + ? WHERE referral_code = ?",
+            (earned_cents, referral_code),
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Frequency capping
+    # ------------------------------------------------------------------
+
+    def get_frequency(self, agent_id: str, campaign_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM frequency_records WHERE agent_id = ? AND campaign_id = ?",
+            (agent_id, campaign_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_impression_freq(self, agent_id: str, campaign_id: str,
+                               window_secs: int = 3600) -> None:
+        import time as _t
+        now = _t.time()
+        existing = self.get_frequency(agent_id, campaign_id)
+        if existing:
+            if now - existing["window_start"] > window_secs:
+                # Reset window
+                self._conn.execute(
+                    "UPDATE frequency_records SET impressions = 1, window_start = ? "
+                    "WHERE agent_id = ? AND campaign_id = ?",
+                    (now, agent_id, campaign_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE frequency_records SET impressions = impressions + 1 "
+                    "WHERE agent_id = ? AND campaign_id = ?",
+                    (agent_id, campaign_id),
+                )
+        else:
+            self._conn.execute(
+                "INSERT INTO frequency_records (agent_id, campaign_id, impressions, window_start) "
+                "VALUES (?,?,1,?)", (agent_id, campaign_id, now),
+            )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # A/B testing
+    # ------------------------------------------------------------------
+
+    def log_ab_event(self, ab_group: str, variant: str, event_type: str,
+                     campaign_id: str = "", revenue_cents: int = 0) -> None:
+        import time as _t
+        self._conn.execute(
+            "INSERT INTO ab_test_events (ab_group, variant, event_type, campaign_id, revenue_cents, timestamp) "
+            "VALUES (?,?,?,?,?,?)",
+            (ab_group, variant, event_type, campaign_id, revenue_cents, _t.time()),
+        )
+        self._conn.commit()
+
+    def get_ab_results(self, ab_group: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT variant,
+                  SUM(CASE WHEN event_type='impression' THEN 1 ELSE 0 END) as impressions,
+                  SUM(CASE WHEN event_type='click' THEN 1 ELSE 0 END) as clicks,
+                  SUM(CASE WHEN event_type='conversion' THEN 1 ELSE 0 END) as conversions,
+                  SUM(revenue_cents) as revenue_cents
+               FROM ab_test_events WHERE ab_group = ? GROUP BY variant""",
+            (ab_group,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Audience segments
+    # ------------------------------------------------------------------
+
+    def upsert_segment(self, seg: AgentSegment) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO agent_segments
+               (segment_id, label, description, criteria, agent_count, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (seg.segment_id, seg.label, seg.description, seg.criteria,
+             seg.agent_count, seg.created_at),
+        )
+        self._conn.commit()
+
+    def get_segment(self, segment_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM agent_segments WHERE segment_id = ?", (segment_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_segments(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute("SELECT * FROM agent_segments").fetchall()
+        return [dict(r) for r in rows]
+
+    def assign_segment(self, agent_id: str, segment_id: str,
+                       confidence: float = 1.0) -> None:
+        import time as _t
+        self._conn.execute(
+            """INSERT OR REPLACE INTO agent_segment_memberships
+               (agent_id, segment_id, confidence, assigned_at) VALUES (?,?,?,?)""",
+            (agent_id, segment_id, confidence, _t.time()),
+        )
+        self._conn.commit()
+
+    def get_agent_segments(self, agent_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT m.*, s.label FROM agent_segment_memberships m
+               JOIN agent_segments s ON m.segment_id = s.segment_id
+               WHERE m.agent_id = ?""",
+            (agent_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_segment_agents(self, segment_id: str) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT agent_id FROM agent_segment_memberships WHERE segment_id = ?",
+            (segment_id,),
+        ).fetchall()
+        return [r["agent_id"] for r in rows]
+
+    # ------------------------------------------------------------------
+    # Touchpoints & Attribution
+    # ------------------------------------------------------------------
+
+    def log_touchpoint(self, tp: TouchPoint) -> None:
+        self._conn.execute(
+            "INSERT INTO touchpoints (agent_id, event_id, event_type, campaign_id, item_id, timestamp) "
+            "VALUES (?,?,?,?,?,?)",
+            (tp.agent_id, tp.event_id, tp.event_type, tp.campaign_id,
+             tp.item_id, tp.timestamp),
+        )
+        self._conn.commit()
+
+    def get_agent_touchpoints(self, agent_id: str, *, item_id: str = "",
+                              limit: int = 50) -> list[dict[str, Any]]:
+        if item_id:
+            rows = self._conn.execute(
+                "SELECT * FROM touchpoints WHERE agent_id = ? AND item_id = ? "
+                "ORDER BY timestamp ASC LIMIT ?",
+                (agent_id, item_id, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM touchpoints WHERE agent_id = ? ORDER BY timestamp ASC LIMIT ?",
+                (agent_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_attribution(self, attr: ConversionAttribution) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO conversion_attributions
+               (order_id, agent_id, item_id, touchpoints, first_touch_campaign,
+                last_touch_campaign, attributed_revenue_cents, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (attr.order_id, attr.agent_id, attr.item_id, attr.touchpoints,
+             attr.first_touch_campaign, attr.last_touch_campaign,
+             attr.attributed_revenue_cents, attr.created_at),
+        )
+        self._conn.commit()
+
+    def get_campaign_attributions(self, campaign_id: str) -> dict[str, Any]:
+        first = self._conn.execute(
+            "SELECT COUNT(*) as cnt, SUM(attributed_revenue_cents) as rev "
+            "FROM conversion_attributions WHERE first_touch_campaign = ?",
+            (campaign_id,),
+        ).fetchone()
+        last = self._conn.execute(
+            "SELECT COUNT(*) as cnt, SUM(attributed_revenue_cents) as rev "
+            "FROM conversion_attributions WHERE last_touch_campaign = ?",
+            (campaign_id,),
+        ).fetchone()
+        return {
+            "campaign_id": campaign_id,
+            "first_touch": {"conversions": first["cnt"] or 0, "revenue_cents": first["rev"] or 0},
+            "last_touch": {"conversions": last["cnt"] or 0, "revenue_cents": last["rev"] or 0},
+        }
+
+    # ------------------------------------------------------------------
+    # Promotions
+    # ------------------------------------------------------------------
+
+    def upsert_promotion(self, promo: Promotion) -> None:
+        import json
+        self._conn.execute(
+            """INSERT OR REPLACE INTO promotions
+               (promo_id, vendor_id, item_id, code, discount_type, discount_value,
+                min_price_cents, max_uses, used_count, starts_at, expires_at,
+                active, bundle_item_ids, promo_type)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (promo.promo_id, promo.vendor_id, promo.item_id, promo.code,
+             promo.discount_type, promo.discount_value, promo.min_price_cents,
+             promo.max_uses, promo.used_count, promo.starts_at, promo.expires_at,
+             int(promo.active), json.dumps(promo.bundle_item_ids), promo.promo_type),
+        )
+        self._conn.commit()
+
+    def get_promotion_by_code(self, code: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM promotions WHERE code = ? AND active = 1", (code,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_active_promotions(self, *, vendor_id: str = "",
+                              item_id: str = "") -> list[dict[str, Any]]:
+        import time as _t
+        now = _t.time()
+        conditions = ["active = 1", "(expires_at = 0 OR expires_at > ?)", "(starts_at = 0 OR starts_at <= ?)"]
+        params: list[Any] = [now, now]
+        if vendor_id:
+            conditions.append("vendor_id = ?")
+            params.append(vendor_id)
+        if item_id:
+            conditions.append("(item_id = ? OR item_id = '')")
+            params.append(item_id)
+        where = " AND ".join(conditions)
+        rows = self._conn.execute(
+            f"SELECT * FROM promotions WHERE {where}", params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def increment_promo_usage(self, promo_id: str) -> None:
+        self._conn.execute(
+            "UPDATE promotions SET used_count = used_count + 1 WHERE promo_id = ?",
+            (promo_id,),
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Cross-sell rules
+    # ------------------------------------------------------------------
+
+    def upsert_cross_sell(self, rule: CrossSellRule) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO cross_sell_rules
+               (source_item_id, target_item_id, relation_type, vendor_id, bid_cents, priority)
+               VALUES (?,?,?,?,?,?)""",
+            (rule.source_item_id, rule.target_item_id, rule.relation_type,
+             rule.vendor_id, rule.bid_cents, rule.priority),
+        )
+        self._conn.commit()
+
+    def get_cross_sells(self, item_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """SELECT cs.*, i.name as target_name, i.price_cents as target_price_cents,
+                      i.rating as target_rating
+               FROM cross_sell_rules cs
+               JOIN items i ON cs.target_item_id = i.id
+               WHERE cs.source_item_id = ?
+               ORDER BY cs.priority DESC, cs.bid_cents DESC""",
+            (item_id,),
+        ).fetchall()
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------

@@ -145,6 +145,86 @@ class CatalogClient:
             "period": period,
         })
 
+    def retarget(self, *, max_offers: int = 5) -> dict[str, Any]:
+        """Get retargeting offers for items you viewed but didn't buy."""
+        return self._send_task({"skill": "catalog.retarget", "max": max_offers})
+
+    def affiliate(self, *, action: str = "status",
+                  vendor_id: str = "") -> dict[str, Any]:
+        """Manage affiliate referrals. action: 'status' or 'create'."""
+        data: dict[str, Any] = {"skill": "catalog.affiliate", "action": action}
+        if vendor_id:
+            data["vendor_id"] = vendor_id
+        return self._send_task(data)
+
+    def auction(self, query: str, *, slots: int = 2,
+                intent_tier: str = "browse") -> dict[str, Any]:
+        """Run a real-time bidding auction for ad slots."""
+        return self._send_task({
+            "skill": "catalog.auction",
+            "q": query, "slots": slots, "intent_tier": intent_tier,
+        })
+
+    def promotions(self, *, vendor_id: str = "",
+                   item_id: str = "") -> dict[str, Any]:
+        """Discover active promotions and deals."""
+        data: dict[str, Any] = {"skill": "catalog.promotions"}
+        if vendor_id:
+            data["vendor_id"] = vendor_id
+        if item_id:
+            data["item_id"] = item_id
+        return self._send_task(data)
+
+    def validate_promo(self, code: str, item_id: str,
+                       price_cents: int) -> dict[str, Any]:
+        """Validate a promo code for a specific item and price."""
+        return self._send_task({
+            "skill": "catalog.promotions",
+            "action": "validate",
+            "code": code,
+            "item_id": item_id,
+            "price_cents": price_cents,
+        })
+
+    def audience(self, *, action: str = "classify") -> dict[str, Any]:
+        """Get or classify agent audience segments."""
+        return self._send_task({"skill": "catalog.audience", "action": action})
+
+    def attribution(self, *, campaign_id: str = "",
+                    agent_id: str = "",
+                    item_id: str = "") -> dict[str, Any]:
+        """Get conversion attribution data."""
+        data: dict[str, Any] = {"skill": "catalog.attribution"}
+        if campaign_id:
+            data["action"] = "campaign"
+            data["campaign_id"] = campaign_id
+        elif agent_id:
+            data["action"] = "journey"
+            data["agent_id"] = agent_id
+            if item_id:
+                data["item_id"] = item_id
+        return self._send_task(data)
+
+    def cross_sell(self, item_id: str, *, max_recs: int = 3) -> dict[str, Any]:
+        """Get cross-sell/upsell recommendations for an item."""
+        return self._send_task({
+            "skill": "catalog.cross_sell", "item_id": item_id, "max": max_recs,
+        })
+
+    def display_ads(self, *, category: str = "",
+                    item_id: str = "", max_ads: int = 2) -> dict[str, Any]:
+        """Get display/banner ads for a category or item context."""
+        data: dict[str, Any] = {"skill": "catalog.display_ads", "max": max_ads}
+        if category:
+            data["cat"] = category
+        if item_id:
+            data["item_id"] = item_id
+        return self._send_task(data)
+
+    def ab_results(self, ab_group: str) -> dict[str, Any]:
+        """Get A/B test results for a test group."""
+        return self._send_task({"skill": "catalog.ab_results", "ab_group": ab_group})
+
     # ------------------------------------------------------------------
     # Helpers to decode compact responses
     # ------------------------------------------------------------------

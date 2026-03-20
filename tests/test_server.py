@@ -293,3 +293,221 @@ def test_search_with_embeddings(client):
     assert "emb" in data["fields"]
     # Each item tuple should have an extra embedding field
     assert len(data["items"][0]) == len(data["fields"])
+
+
+# -----------------------------------------------------------------------
+# Display Ads tests
+# -----------------------------------------------------------------------
+
+def test_display_ads(client):
+    data = _send(client, {"skill": "catalog.display_ads", "max": 3})
+    assert "ads" in data
+    assert "count" in data
+    assert isinstance(data["ads"], list)
+
+
+def test_display_ads_by_category(client):
+    data = _send(client, {"skill": "catalog.display_ads", "cat": "audio", "max": 2})
+    assert "ads" in data
+
+
+# -----------------------------------------------------------------------
+# Retargeting tests
+# -----------------------------------------------------------------------
+
+def test_retarget_with_prior_view(client):
+    """View an item, then ask for retarget offers — should get at least one."""
+    _send(client, {"skill": "catalog.lookup", "id": "WE-001"})
+    data = _send(client, {"skill": "catalog.retarget", "max": 5})
+    assert "offers" in data
+    assert "count" in data
+    # We viewed WE-001 but didn't buy — should get an offer
+    assert data["count"] >= 1
+    offer_ids = [o["item_id"] for o in data["offers"]]
+    assert "WE-001" in offer_ids
+
+
+# -----------------------------------------------------------------------
+# Affiliate tests
+# -----------------------------------------------------------------------
+
+def test_affiliate_create(client):
+    data = _send(client, {
+        "skill": "catalog.affiliate",
+        "action": "create",
+        "vendor_id": "v-soundpod",
+    })
+    assert "referral_code" in data
+    assert data["referral_code"].startswith("ref-")
+    assert data["vendor_id"] == "v-soundpod"
+
+
+def test_affiliate_status(client):
+    # First create one
+    _send(client, {
+        "skill": "catalog.affiliate",
+        "action": "create",
+        "vendor_id": "v-soundpod",
+    })
+    data = _send(client, {"skill": "catalog.affiliate", "action": "status"})
+    assert "referrals" in data
+    assert "count" in data
+    assert data["count"] >= 1
+
+
+# -----------------------------------------------------------------------
+# RTB Auction tests
+# -----------------------------------------------------------------------
+
+def test_auction(client):
+    data = _send(client, {
+        "skill": "catalog.auction",
+        "q": "earbuds",
+        "slots": 2,
+    })
+    assert "winners" in data
+    assert "count" in data
+    assert isinstance(data["winners"], list)
+
+
+# -----------------------------------------------------------------------
+# Promotions tests
+# -----------------------------------------------------------------------
+
+def test_promotions_discover(client):
+    data = _send(client, {"skill": "catalog.promotions", "action": "discover"})
+    assert "promotions" in data
+    assert "count" in data
+    assert data["count"] >= 1  # seed data has SOUND10
+
+
+def test_promotions_validate(client):
+    data = _send(client, {
+        "skill": "catalog.promotions",
+        "action": "validate",
+        "code": "SOUND10",
+        "item_id": "WE-001",
+        "price_cents": 4999,
+    })
+    assert data["valid"] is True
+    assert "discount_cents" in data
+    assert data["discount_cents"] > 0
+
+
+def test_promotions_validate_invalid_code(client):
+    result = _send(client, {
+        "skill": "catalog.promotions",
+        "action": "validate",
+        "code": "BOGUS",
+        "item_id": "WE-001",
+        "price_cents": 4999,
+    })
+    # Invalid code returns a failed state since validate_code puts "error" in response
+    assert result["status"]["state"] == "failed"
+
+
+# -----------------------------------------------------------------------
+# Audience Segments tests
+# -----------------------------------------------------------------------
+
+def test_audience_list(client):
+    data = _send(client, {"skill": "catalog.audience", "action": "list"})
+    assert "segments" in data
+    assert "count" in data
+    assert data["count"] >= 5  # 5 default segments
+
+
+def test_audience_classify(client):
+    data = _send(client, {"skill": "catalog.audience", "action": "classify"})
+    assert "agent_id" in data
+    assert "segments" in data
+
+
+# -----------------------------------------------------------------------
+# Attribution tests
+# -----------------------------------------------------------------------
+
+def test_attribution_journey(client):
+    # Do some activity to generate touchpoints
+    _send(client, {"skill": "catalog.search", "q": "earbuds"})
+    _send(client, {"skill": "catalog.lookup", "id": "WE-001"})
+
+    data = _send(client, {
+        "skill": "catalog.attribution",
+        "action": "journey",
+        "agent_id": "dev-agent",
+    })
+    assert "touchpoints" in data
+    assert "count" in data
+
+
+def test_attribution_campaign(client):
+    data = _send(client, {
+        "skill": "catalog.attribution",
+        "action": "campaign",
+        "campaign_id": "ad-001",
+    })
+    # Should return attribution data (may be empty if no purchases)
+    assert isinstance(data, dict)
+
+
+# -----------------------------------------------------------------------
+# Cross-Sell tests
+# -----------------------------------------------------------------------
+
+def test_cross_sell(client):
+    data = _send(client, {"skill": "catalog.cross_sell", "item_id": "WE-001"})
+    assert "item_id" in data
+    assert data["item_id"] == "WE-001"
+    assert "recommendations" in data
+    assert "count" in data
+    # Seed data has a cross-sell rule for WE-001 -> WE-003
+    assert data["count"] >= 1
+
+
+def test_cross_sell_missing_item(client):
+    result = _send(client, {"skill": "catalog.cross_sell"})
+    assert result["status"]["state"] == "failed"
+
+
+# -----------------------------------------------------------------------
+# A/B Results tests
+# -----------------------------------------------------------------------
+
+def test_ab_results_missing_group(client):
+    result = _send(client, {"skill": "catalog.ab_results"})
+    assert result["status"]["state"] == "failed"
+
+
+def test_ab_results(client):
+    data = _send(client, {"skill": "catalog.ab_results", "ab_group": "test-group"})
+    assert "ab_group" in data
+    assert "variants" in data
+    assert "count" in data
+
+
+# -----------------------------------------------------------------------
+# Purchase with promo code test
+# -----------------------------------------------------------------------
+
+def test_purchase_with_promo(client):
+    data = _send(client, {
+        "skill": "catalog.purchase",
+        "item_id": "WE-001",
+        "quantity": 1,
+        "payment_token": "pay_tok_promo_test",
+        "promo_code": "SOUND10",
+    })
+    assert "order_id" in data
+    assert data["status"] == "confirmed"
+
+
+# -----------------------------------------------------------------------
+# Agent Card updated skill count
+# -----------------------------------------------------------------------
+
+def test_agent_card_has_20_skills(client):
+    resp = client.get("/.well-known/agent.json")
+    card = resp.json()
+    assert len(card["skills"]) == 20
+    assert card["version"] == "0.3.0"

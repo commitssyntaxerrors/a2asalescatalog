@@ -14,11 +14,17 @@ from typing import Any
 
 from src.common.models import CATEGORY_FIELDS, SEARCH_FIELDS, SEARCH_FIELDS_WITH_EMB
 from src.server.ads import AdEngine
+from src.server.affiliates import AffiliateEngine
 from src.server.agent_tracker import AgentTracker
+from src.server.attribution import AttributionEngine
+from src.server.audience import AudienceEngine
 from src.server.embeddings import EmbeddingIndex
 from src.server.federation import FederationManager
 from src.server.negotiation import NegotiationEngine
+from src.server.promotions import PromotionEngine
 from src.server.purchase import PurchaseEngine
+from src.server.retargeting import RetargetingEngine
+from src.server.rtb import RTBEngine
 from src.server.store import CatalogStore
 from src.server.vendor_analytics import VendorAnalytics
 
@@ -38,6 +44,12 @@ class SkillRouter:
         federation: FederationManager,
         embeddings: EmbeddingIndex,
         vendor_analytics: VendorAnalytics,
+        retargeting: RetargetingEngine,
+        affiliates: AffiliateEngine,
+        rtb: RTBEngine,
+        promotions: PromotionEngine,
+        audience: AudienceEngine,
+        attribution: AttributionEngine,
     ) -> None:
         self._store = store
         self._ads = ad_engine
@@ -47,6 +59,12 @@ class SkillRouter:
         self._federation = federation
         self._embeddings = embeddings
         self._vendor_analytics = vendor_analytics
+        self._retargeting = retargeting
+        self._affiliates = affiliates
+        self._rtb = rtb
+        self._promotions = promotions
+        self._audience = audience
+        self._attribution = attribution
         self._handlers: dict[str, Any] = {
             "catalog.search": self._handle_search,
             "catalog.lookup": self._handle_lookup,
@@ -59,6 +77,15 @@ class SkillRouter:
             "catalog.embed": self._handle_embed,
             "catalog.peers": self._handle_peers,
             "catalog.vendor_analytics": self._handle_vendor_analytics,
+            "catalog.retarget": self._handle_retarget,
+            "catalog.affiliate": self._handle_affiliate,
+            "catalog.auction": self._handle_auction,
+            "catalog.promotions": self._handle_promotions,
+            "catalog.audience": self._handle_audience,
+            "catalog.attribution": self._handle_attribution,
+            "catalog.cross_sell": self._handle_cross_sell,
+            "catalog.display_ads": self._handle_display_ads,
+            "catalog.ab_results": self._handle_ab_results,
         }
 
     def handle(self, data: dict[str, Any], agent_id: str = "") -> dict[str, Any]:
@@ -98,7 +125,16 @@ class SkillRouter:
 
         # Intent-aware ad injection
         intent_tier = self._tracker.get_intent_tier(agent_id) if agent_id else "browse"
-        merged = self._ads.inject_sponsored(organic, q, cat, limit, intent_tier=intent_tier)
+        merged = self._ads.inject_sponsored(organic, q, cat, limit,
+                                            intent_tier=intent_tier, agent_id=agent_id)
+
+        # Record ad touchpoints for attribution
+        if agent_id:
+            for row in merged:
+                if row.get("sponsored") and row.get("ad_tag"):
+                    self._attribution.record_touchpoint(
+                        agent_id, "ad_impression", item_id=row["id"],
+                    )
 
         # Encode as compact tuples
         fields = SEARCH_FIELDS_WITH_EMB if include_emb else SEARCH_FIELDS
@@ -151,7 +187,7 @@ class SkillRouter:
             if profile["reputation"] >= (row.get("reputation_threshold") or 0):
                 price = row["trusted_price_cents"]
 
-        return {
+        result = {
             "id": row["id"],
             "name": row["name"],
             "desc": row["desc"],
@@ -166,6 +202,29 @@ class SkillRouter:
             "sponsored": row["sponsored"],
             "ad_tag": row.get("ad_tag"),
         }
+
+        # Cross-sell recommendations
+        cross_sells = self._ads.get_cross_sell_recommendations(item_id)
+        if cross_sells:
+            result["cross_sell"] = cross_sells
+
+        # Display ads relevant to this item's category
+        display = self._ads.get_display_ads(
+            category=row.get("category_id"), item_id=item_id, agent_id=agent_id,
+        )
+        if display:
+            result["display_ads"] = display
+
+        # Active promotions for this item
+        promos = self._store.get_active_promotions(item_id=item_id)
+        if promos:
+            result["promotions"] = [
+                {"code": p["code"], "discount_type": p["discount_type"],
+                 "discount_value": p["discount_value"], "promo_type": p["promo_type"]}
+                for p in promos if p.get("code")
+            ]
+
+        return result
 
     # ------------------------------------------------------------------
     # catalog.categories
@@ -243,8 +302,45 @@ class SkillRouter:
         if not agent_id:
             return {"error": "Authentication required for purchase"}
         item_id = data.get("item_id", "")
+
+        # Validate promo code if present
+        promo_code = data.get("promo_code", "")
+        promo_discount = 0
+        if promo_code:
+            item = self._store.lookup(item_id)
+            if item:
+                validation = self._promotions.validate_code(
+                    promo_code, item_id, item["price_cents"],
+                )
+                if not validation.get("valid"):
+                    return {"error": validation.get("error", "Invalid promo code")}
+                promo_discount = validation.get("discount_cents", 0)
+
         self._tracker.log(agent_id, "purchase", item_id=item_id)
-        return self._purchase.purchase(agent_id, data)
+        result = self._purchase.purchase(agent_id, data)
+
+        if "order_id" in result:
+            # Apply promo discount
+            if promo_discount > 0 and promo_code:
+                self._promotions.redeem(promo_code)
+                result["promo_discount_cents"] = promo_discount
+
+            # Record conversion attribution
+            self._attribution.attribute_conversion(
+                result["order_id"], agent_id, item_id,
+                result.get("total_cents", 0),
+            )
+
+            # Record affiliate sale if referral_code provided
+            ref_code = data.get("referral_code", "")
+            if ref_code:
+                aff_result = self._affiliates.record_sale(
+                    ref_code, result.get("total_cents", 0),
+                )
+                if aff_result:
+                    result["affiliate_commission_cents"] = aff_result["commission_cents"]
+
+        return result
 
     # ------------------------------------------------------------------
     # catalog.agent_profile
@@ -318,3 +414,103 @@ class SkillRouter:
 
     def _handle_vendor_analytics(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
         return self._vendor_analytics.report(data)
+
+    # ------------------------------------------------------------------
+    # catalog.retarget
+    # ------------------------------------------------------------------
+
+    def _handle_retarget(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        return self._retargeting.handle(agent_id, data)
+
+    # ------------------------------------------------------------------
+    # catalog.affiliate
+    # ------------------------------------------------------------------
+
+    def _handle_affiliate(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        return self._affiliates.handle(agent_id, data)
+
+    # ------------------------------------------------------------------
+    # catalog.auction (RTB)
+    # ------------------------------------------------------------------
+
+    def _handle_auction(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        return self._rtb.handle(data)
+
+    # ------------------------------------------------------------------
+    # catalog.promotions
+    # ------------------------------------------------------------------
+
+    def _handle_promotions(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        action = data.get("action", "discover")
+        if action == "validate":
+            code = data.get("code", "")
+            item_id = data.get("item_id", "")
+            price = int(data.get("price_cents", 0))
+            return self._promotions.validate_code(code, item_id, price)
+        return self._promotions.discover(data)
+
+    # ------------------------------------------------------------------
+    # catalog.audience
+    # ------------------------------------------------------------------
+
+    def _handle_audience(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        return self._audience.handle(agent_id, data)
+
+    # ------------------------------------------------------------------
+    # catalog.attribution
+    # ------------------------------------------------------------------
+
+    def _handle_attribution(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        return self._attribution.handle(data)
+
+    # ------------------------------------------------------------------
+    # catalog.cross_sell
+    # ------------------------------------------------------------------
+
+    def _handle_cross_sell(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        item_id = data.get("item_id", "")
+        if not item_id:
+            return {"error": "item_id required"}
+        max_recs = min(int(data.get("max", 3)), 10)
+        recs = self._ads.get_cross_sell_recommendations(item_id, max_recs=max_recs)
+        return {"item_id": item_id, "recommendations": recs, "count": len(recs)}
+
+    # ------------------------------------------------------------------
+    # catalog.display_ads
+    # ------------------------------------------------------------------
+
+    def _handle_display_ads(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        category = data.get("cat")
+        item_id = data.get("item_id")
+        max_ads = min(int(data.get("max", 2)), 5)
+        ads = self._ads.get_display_ads(
+            category=category, item_id=item_id,
+            agent_id=agent_id, max_ads=max_ads,
+        )
+        return {"ads": ads, "count": len(ads)}
+
+    # ------------------------------------------------------------------
+    # catalog.ab_results
+    # ------------------------------------------------------------------
+
+    def _handle_ab_results(self, data: dict[str, Any], agent_id: str) -> dict[str, Any]:
+        ab_group = data.get("ab_group", "")
+        if not ab_group:
+            return {"error": "ab_group required"}
+        results = self._store.get_ab_results(ab_group)
+        return {
+            "ab_group": ab_group,
+            "variants": [
+                {
+                    "variant": r["variant"],
+                    "impressions": r["impressions"],
+                    "clicks": r["clicks"],
+                    "conversions": r["conversions"],
+                    "revenue_cents": r["revenue_cents"],
+                    "ctr": round(r["clicks"] / r["impressions"], 4) if r["impressions"] else 0,
+                    "cvr": round(r["conversions"] / r["impressions"], 4) if r["impressions"] else 0,
+                }
+                for r in results
+            ],
+            "count": len(results),
+        }

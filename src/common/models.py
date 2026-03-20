@@ -73,6 +73,170 @@ class AdCampaign:
     spent_cents: int = 0
     active: bool = True
     ad_tag: str = ""
+    # Display ad support
+    promo_headline: str = ""
+    promo_body: str = ""
+    promo_image_url: str = ""
+    promo_type: str = "search"  # search, display, retarget, cross_sell
+    # Frequency capping
+    freq_cap_count: int = 0  # 0 = unlimited
+    freq_cap_window_secs: int = 3600
+    # A/B testing
+    ab_variant: str = ""  # variant label (e.g., "A", "B")
+    ab_group: str = ""  # test group identifier
+    # Creative rotation
+    creatives: list[str] = field(default_factory=list)  # JSON list of creative dicts
+    creative_weights: list[float] = field(default_factory=list)
+    # Campaign scheduling / dayparting
+    schedule_start: float = 0.0  # unix timestamp, 0 = always
+    schedule_end: float = 0.0
+    schedule_hours: list[int] = field(default_factory=list)  # hours of day (0-23)
+    schedule_days: list[int] = field(default_factory=list)   # days of week (0=Mon, 6=Sun)
+    # Audience targeting
+    target_segments: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DisplayAd:
+    """A structured promotional block injected into non-search responses."""
+    campaign_id: str
+    vendor_id: str
+    headline: str
+    body: str
+    image_url: str = ""
+    item_id: str = ""
+    ad_tag: str = ""
+    creative_variant: str = ""
+
+
+@dataclass(slots=True)
+class RetargetOffer:
+    """A retargeting offer for an agent who viewed but didn't purchase."""
+    agent_id: str
+    item_id: str
+    item_name: str
+    original_price_cents: int
+    offer_price_cents: int
+    discount_pct: float
+    expires_at: float = 0.0
+    campaign_id: str = ""
+
+
+@dataclass(slots=True)
+class AffiliateLink:
+    """Tracks referral commissions between agents."""
+    referral_code: str
+    referring_agent_id: str
+    vendor_id: str
+    commission_bps: int = 500  # basis points (5% default)
+    total_referrals: int = 0
+    total_earned_cents: int = 0
+    active: bool = True
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class AuctionBid:
+    """A single bid in a real-time bidding auction."""
+    campaign_id: str
+    vendor_id: str
+    bid_cents: int
+    ad_tag: str = ""
+    item_id: str = ""
+
+
+@dataclass(slots=True)
+class FrequencyRecord:
+    """Tracks how many times an agent has seen a specific campaign."""
+    agent_id: str
+    campaign_id: str
+    impressions: int = 0
+    window_start: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class ABTestResult:
+    """Aggregated A/B test variant metrics."""
+    ab_group: str
+    variant: str
+    impressions: int = 0
+    clicks: int = 0
+    conversions: int = 0
+    revenue_cents: int = 0
+
+
+@dataclass(slots=True)
+class AgentSegment:
+    """Behavioral audience segment for agent targeting."""
+    segment_id: str
+    label: str
+    description: str = ""
+    criteria: str = "{}"  # JSON criteria definition
+    agent_count: int = 0
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class AgentSegmentMembership:
+    """Maps agents to audience segments."""
+    agent_id: str
+    segment_id: str
+    confidence: float = 1.0
+    assigned_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class TouchPoint:
+    """A single touchpoint in a conversion attribution chain."""
+    agent_id: str
+    event_id: str
+    event_type: str  # search, lookup, compare, ad_impression, ad_click
+    campaign_id: str = ""
+    item_id: str = ""
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class ConversionAttribution:
+    """Attribution record linking a purchase to ad touchpoints."""
+    order_id: str
+    agent_id: str
+    item_id: str
+    touchpoints: int = 0
+    first_touch_campaign: str = ""
+    last_touch_campaign: str = ""
+    attributed_revenue_cents: int = 0
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True)
+class Promotion:
+    """Time-limited discount / deal / coupon."""
+    promo_id: str
+    vendor_id: str
+    item_id: str = ""  # empty = vendor-wide
+    code: str = ""
+    discount_type: str = "percent"  # percent, fixed_cents
+    discount_value: int = 0  # percent (e.g., 10) or cents
+    min_price_cents: int = 0
+    max_uses: int = 0  # 0 = unlimited
+    used_count: int = 0
+    starts_at: float = 0.0
+    expires_at: float = 0.0
+    active: bool = True
+    bundle_item_ids: list[str] = field(default_factory=list)
+    promo_type: str = "coupon"  # coupon, flash_sale, bundle
+
+
+@dataclass(slots=True)
+class CrossSellRule:
+    """Defines cross-sell / upsell relationships between items."""
+    source_item_id: str
+    target_item_id: str
+    relation_type: str = "cross_sell"  # cross_sell, upsell
+    vendor_id: str = ""
+    bid_cents: int = 0  # vendor pays for recommendation
+    priority: int = 0
 
 
 @dataclass(slots=True)

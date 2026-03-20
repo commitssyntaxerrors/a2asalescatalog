@@ -23,11 +23,17 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from src.server.ads import AdEngine
+from src.server.affiliates import AffiliateEngine
 from src.server.agent_tracker import AgentTracker
+from src.server.attribution import AttributionEngine
+from src.server.audience import AudienceEngine
 from src.server.embeddings import EmbeddingIndex
 from src.server.federation import FederationManager
 from src.server.negotiation import NegotiationEngine
+from src.server.promotions import PromotionEngine
 from src.server.purchase import PurchaseEngine
+from src.server.retargeting import RetargetingEngine
+from src.server.rtb import RTBEngine
 from src.server.skills import SkillRouter
 from src.server.store import CatalogStore
 from src.server.vendor_analytics import VendorAnalytics
@@ -71,9 +77,16 @@ async def lifespan(app: Starlette):
     federation = FederationManager(store)
     embeddings = EmbeddingIndex(store)
     analytics = VendorAnalytics(store)
+    retargeting = RetargetingEngine(store)
+    affiliates = AffiliateEngine(store)
+    rtb = RTBEngine(store)
+    promotions = PromotionEngine(store)
+    audience = AudienceEngine(store)
+    attribution = AttributionEngine(store)
     router = SkillRouter(
         store, ad_engine, tracker, negotiation, purchase,
         federation, embeddings, analytics,
+        retargeting, affiliates, rtb, promotions, audience, attribution,
     )
 
     # Seed demo data if empty
@@ -206,7 +219,9 @@ def _handle_task_get(rpc_id: Any, params: dict) -> JSONResponse:
 
 def _seed_demo_data(s: CatalogStore) -> None:
     """Populate the store with sample data for development."""
-    from src.common.models import AdCampaign, CatalogItem, Category, Vendor
+    from src.common.models import (
+        AdCampaign, CatalogItem, Category, CrossSellRule, Promotion, Vendor,
+    )
 
     # Vendors
     vendors = [
@@ -283,6 +298,38 @@ def _seed_demo_data(s: CatalogStore) -> None:
         spent_cents=0,
         active=True,
         ad_tag="sp",
+    ))
+
+    # Demo promotion — 10% off earbuds
+    import time as _t
+    s.upsert_promotion(Promotion(
+        promo_id="promo-001",
+        vendor_id="v-soundpod",
+        item_id="WE-001",
+        code="SOUND10",
+        discount_type="percent",
+        discount_value=10,
+        starts_at=_t.time() - 86400,
+        expires_at=_t.time() + 86400 * 30,
+        promo_type="coupon",
+    ))
+
+    # Demo cross-sell rules
+    s.upsert_cross_sell(CrossSellRule(
+        source_item_id="WE-001",
+        target_item_id="WE-003",
+        relation_type="upsell",
+        vendor_id="v-clearair",
+        bid_cents=20,
+        priority=10,
+    ))
+    s.upsert_cross_sell(CrossSellRule(
+        source_item_id="WE-002",
+        target_item_id="WE-001",
+        relation_type="cross_sell",
+        vendor_id="v-soundpod",
+        bid_cents=15,
+        priority=5,
     ))
 
 
