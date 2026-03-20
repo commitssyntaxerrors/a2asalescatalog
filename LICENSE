@@ -46,16 +46,57 @@ This repository serves as a dated public disclosure of the concepts,
 methods, architectures, and implementations described herein, including
 but not limited to:
 
+Core Marketplace:
 - Agent-to-agent (A2A) protocol-based product catalog marketplace
-- Compact positional-tuple wire format for LLM-optimized commerce data
+- Compact positional-tuple wire format (CAI) for LLM-optimized commerce data
+- AXON (Agent eXchange Object Notation) — proprietary token-minimized
+  plaintext wire format with sigil-typed values ($, ★, #, ~, @, %, !),
+  schema-indexed columns (@{schema}), pipe delimiters, and section blocks
+  for agent-to-agent commerce communication (~65-70% token reduction vs JSON)
 - Ad-supported marketplace where AI agents are the consumer audience
+
+Agent Intelligence:
 - Intent-tiered advertising based on agent repeat-visit behavior scoring
+  with four-tier classification (browse, consider, high-intent, ready-to-buy)
 - Agent reputation and trust scoring for commerce interactions
-- Programmatic negotiation protocol between AI agents
-- Agent-to-agent purchase completion protocol
+- Agent interest scoring algorithm with recency-decay weighting
+- Behavioral audience segmentation and classification of AI agents
+  (bargain hunters, premium buyers, researchers, impulse buyers, loyal repeat)
+
+Commerce Protocols:
+- Programmatic negotiation protocol between AI agents with round-limited
+  counter-offer mechanics and vendor floor pricing
+- Agent-to-agent purchase completion protocol with tokenized payments
 - Federated catalog network for cross-catalog product discovery
-- Semantic embedding delivery for agent-side re-ranking
-- Vendor analytics for AI agent audience behavior
+  with peer verification and cross-catalog fan-out search
+
+Data & Analytics:
+- Semantic embedding delivery for agent-side re-ranking and clustering
+- Vendor analytics for AI agent audience behavior (intent breakdown,
+  comparison losses, repeat agent rates, conversion funnels)
+- Multi-touch conversion attribution for agent-to-agent commerce
+  (first-touch and last-touch models with touchpoint journey tracking)
+
+Advertising & Monetization:
+- Display and banner ad placements for AI agent audiences with
+  structured creative data (headline, body, image)
+- Retargeting and remarketing with time-decayed discount offers
+  for AI agents based on view-but-not-purchase behavior
+- Affiliate and referral program with commission tracking between AI agents
+- Real-time bidding (RTB) auction system for agent-facing ad placements
+  with budget management and intent-tier bid adjustments
+- Frequency capping for agent ad impressions with per-campaign
+  rolling-window enforcement
+- A/B testing framework for ad creatives served to AI agents
+  with per-variant impression, click, and conversion tracking
+- Promotional campaigns engine (coupons, flash sales, bundles)
+  with usage limits, minimum purchase amounts, and promo code validation
+- Cross-sell and upsell recommendation engine for AI agent buyers
+  with vendor-defined rules (cross-sell, upsell, bundle)
+- Creative rotation with weighted round-robin distribution
+  for agent-facing ad variants
+- Campaign scheduling and dayparting for agent-targeted advertising
+  with date range, hour-of-day, and day-of-week constraints
 
 First published: March 19, 2026.
 
